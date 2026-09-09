@@ -1,0 +1,8 @@
+{
+  "name": "VMO - Portal Executivo - Atual3",
+  "description": "Portal Executivo do VMO Corporativo da Exed Consulting para demonstração de relatórios financeiros e gestão de projetos SAP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Nunito', Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #06121E;
+    color: #E2E8F0;
+    overflow-x: hidden;
+  }
+}
+
+/* Corporate Neon Glow Utilities */
+.neon-glow-green {
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.25), inset 0 0 10px rgba(0, 255, 136, 0.05);
+}
+
+.neon-glow-orange {
+  box-shadow: 0 0 15px rgba(242, 101, 34, 0.3), inset 0 0 10px rgba(242, 101, 34, 0.05);
+}
+
+.neon-glow-blue {
+  box-shadow: 0 0 15px rgba(0, 210, 255, 0.25), inset 0 0 10px rgba(0, 210, 255, 0.05);
+}
+
+.neon-glow-red {
+  box-shadow: 0 0 15px rgba(255, 51, 102, 0.25), inset 0 0 10px rgba(255, 51, 102, 0.05);
+}
+
+.neon-border-green {
+  border-color: #00FF88;
+}
+
+.neon-border-orange {
+  border-color: #F26522;
+}
+
+.neon-border-blue {
+  border-color: #00D2FF;
+}
+
+.neon-border-red {
+  border-color: #FF3366;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #071726;
+}
+::-webkit-scrollbar-thumb {
+  background: #1B3E68;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #F26522;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+}
