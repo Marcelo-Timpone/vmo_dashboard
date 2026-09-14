@@ -1,5 +1,5 @@
-import { handlePreflight, isAuthorized, sendUnauthorized } from '../../lib/apiAuth';
-import { loadState, saveState } from '../../lib/vmoState';
+import { handlePreflight, isAuthorized, sendUnauthorized } from '../../lib/apiAuth.js';
+import { loadState, saveState } from '../../lib/vmoState.js';
 
 export default async function handler(req: any, res: any) {
   if (handlePreflight(req, res)) return;

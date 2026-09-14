@@ -1,4 +1,4 @@
-import { handlePreflight, getConfiguredApiKey } from '../../lib/apiAuth';
+import { handlePreflight, getConfiguredApiKey } from '../../lib/apiAuth.js';
 
 // Rota pública (sem API key) — só existe para o próprio webapp exibir a
 // chave/endpoints configurados na tela de Configuração.

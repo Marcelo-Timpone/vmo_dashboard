@@ -1,5 +1,5 @@
-import { handlePreflight } from '../../lib/apiAuth';
-import { loadState } from '../../lib/vmoState';
+import { handlePreflight } from '../../lib/apiAuth.js';
+import { loadState } from '../../lib/vmoState.js';
 
 // Rota pública (sem API key) — usada para checar se a API está no ar.
 export default async function handler(req: any, res: any) {

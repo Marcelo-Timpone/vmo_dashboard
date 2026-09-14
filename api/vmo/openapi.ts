@@ -1,4 +1,4 @@
-import { handlePreflight } from '../../lib/apiAuth';
+import { handlePreflight } from '../../lib/apiAuth.js';
 
 // Rota pública (sem API key) — descrição OpenAPI 3.0 da API, para importar em
 // Claude Projects / Custom Connectors / ferramentas de terceiros.

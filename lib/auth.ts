@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { getSupabaseAdminClient, isSupabaseAdminConfigured } from './supabaseAdmin';
+import { getSupabaseAdminClient, isSupabaseAdminConfigured } from './supabaseAdmin.js';
 
 // ==============================================================================
 // AUTENTICAÇÃO REAL DE USUÁRIOS (login + gestão de usuários pelo PMO)

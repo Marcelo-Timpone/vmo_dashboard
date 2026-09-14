@@ -1,5 +1,5 @@
-import { handlePreflight } from '../../lib/apiAuth';
-import { findUserByUsername, verifyPassword, signSession, toPublicUser } from '../../lib/auth';
+import { handlePreflight } from '../../lib/apiAuth.js';
+import { findUserByUsername, verifyPassword, signSession, toPublicUser } from '../../lib/auth.js';
 
 export default async function handler(req: any, res: any) {
   if (handlePreflight(req, res)) return;

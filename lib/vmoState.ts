@@ -9,8 +9,8 @@ import {
   INITIAL_PAGE_LAYOUT,
   INITIAL_CONTAINER_LAYOUT,
   INITIAL_MONTHLY_HISTORY
-} from '../src/data/initialData';
-import { calculateVmoReferencePeriod } from '../src/utils/dateUtils';
+} from '../src/data/initialData.js';
+import { calculateVmoReferencePeriod } from '../src/utils/dateUtils.js';
 import {
   SapProjectFinancial,
   ClientInfo,
@@ -22,8 +22,8 @@ import {
   PageLayoutConfig,
   ContainerLayoutConfig,
   MonthlyKpiSnapshot
-} from '../src/types';
-import { getSupabaseAdminClient, isSupabaseAdminConfigured } from './supabaseAdmin';
+} from '../src/types.js';
+import { getSupabaseAdminClient, isSupabaseAdminConfigured } from './supabaseAdmin.js';
 
 // ==============================================================================
 // ESTADO COMPLETO DO WEBAPP EXPOSTO/EDITADO PELA API DO CLAUDE

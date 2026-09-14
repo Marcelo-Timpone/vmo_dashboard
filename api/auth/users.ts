@@ -1,4 +1,4 @@
-import { handlePreflight } from '../../lib/apiAuth';
+import { handlePreflight } from '../../lib/apiAuth.js';
 import {
   requirePmoSession,
   listUsers,
@@ -7,7 +7,7 @@ import {
   deleteUser,
   toPublicUser,
   getSessionFromRequest
-} from '../../lib/auth';
+} from '../../lib/auth.js';
 
 function sendForbidden(res: any) {
   res.status(403).json({
