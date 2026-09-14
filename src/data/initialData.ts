@@ -3,7 +3,10 @@ import {
   DashboardWidgetConfig,
   SharePointFolderLink,
   PromptRecordItem,
-  ClientInfo
+  ClientInfo,
+  PageLayoutConfig,
+  ContainerLayoutConfig,
+  MonthlyKpiSnapshot
 } from '../types';
 import { SupabaseUsuarioRow } from '../services/supabaseService';
 
@@ -914,3 +917,39 @@ export const DEFAULT_CONTAINER_SETTINGS = {
   npsPromoterCutoff: 75,
   crHighValueAlert: 100000
 };
+
+// ==============================================================================
+// LAYOUT DO DASHBOARD: ORDEM E VISIBILIDADE DE PÁGINAS E CONTÊINERES
+// ==============================================================================
+export const INITIAL_PAGE_LAYOUT: PageLayoutConfig[] = [
+  { key: 'one_page', label: 'One Page', order: 0, hidden: false },
+  { key: 'pontos_atencao', label: 'Pontos de Atenção', order: 1, hidden: false },
+  { key: 'informacoes_gerais', label: 'Informações Gerais', order: 2, hidden: false },
+  { key: 'detalhamento_financeiro', label: 'Detalhamento Financeiro', order: 3, hidden: false }
+];
+
+export const INITIAL_CONTAINER_LAYOUT: ContainerLayoutConfig[] = [
+  { id: 'one_page__principais_informacoes', pageKey: 'one_page', label: 'Principais Informações', order: 0, hidden: false },
+  { id: 'one_page__meta_receita', pageKey: 'one_page', label: 'Meta de Receita (Burnup)', order: 1, hidden: false },
+  { id: 'one_page__meta_margem', pageKey: 'one_page', label: 'Meta de Margem', order: 2, hidden: false },
+  { id: 'one_page__contribuicoes_metas', pageKey: 'one_page', label: 'Contribuições para as Metas', order: 3, hidden: false },
+
+  { id: 'pontos_atencao__detratores', pageKey: 'pontos_atencao', label: 'Projetos Detratores', order: 0, hidden: false },
+  { id: 'pontos_atencao__cronogramas', pageKey: 'pontos_atencao', label: 'Aderência aos Cronogramas e Atrasos', order: 1, hidden: false },
+  { id: 'pontos_atencao__documentacao', pageKey: 'pontos_atencao', label: 'Documentação Registrada ao PMO', order: 2, hidden: false },
+
+  { id: 'informacoes_gerais__orcamento', pageKey: 'informacoes_gerais', label: 'Projetos com Maior Uso de Orçamento', order: 0, hidden: false },
+  { id: 'informacoes_gerais__crs_abertos', pageKey: 'informacoes_gerais', label: 'CRs em Aberto', order: 1, hidden: false },
+  { id: 'informacoes_gerais__uso_alm', pageKey: 'informacoes_gerais', label: 'Uso de ALM', order: 2, hidden: false },
+  { id: 'informacoes_gerais__avaliacoes', pageKey: 'informacoes_gerais', label: 'Avaliações (NPS)', order: 3, hidden: false },
+
+  { id: 'detalhamento_financeiro__tabela', pageKey: 'detalhamento_financeiro', label: 'Tabela de Detalhamento Financeiro', order: 0, hidden: false }
+];
+
+// ==============================================================================
+// HISTÓRICO MENSAL DE INDICADORES AGREGADOS (para os gráficos comparativos)
+// ==============================================================================
+// Vazio por padrão de propósito: preferimos mostrar "sem dados ainda" a
+// inventar números. É preenchido pela migração (Claude) ou manualmente em
+// Configurações > Layout do Dashboard > Histórico Mensal.
+export const INITIAL_MONTHLY_HISTORY: MonthlyKpiSnapshot[] = [];

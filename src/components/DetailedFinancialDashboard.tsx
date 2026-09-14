@@ -1,19 +1,24 @@
 import React, { useMemo } from 'react';
-import { SapProjectFinancial, AppTheme } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerLayoutConfig } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
+import { ContainerSlot } from './ContainerSlot';
 
 interface DetailedFinancialDashboardProps {
   projects: SapProjectFinancial[];
   selectedFilters: FilterSolutionType[];
   theme?: AppTheme;
+  containerLayout?: ContainerLayoutConfig[];
+  isPmo?: boolean;
 }
 
 export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProps> = ({
   projects,
   selectedFilters,
-  theme = 'neon'
+  theme = 'neon',
+  containerLayout,
+  isPmo = false
 }) => {
   const isLight = theme === 'light';
 
@@ -24,7 +29,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
     }
     return projects.filter(p => {
       return selectedFilters.some(filter => {
-        if (filter === 'SCP') return p.solution.includes('SCP');
+        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
         return p.solution === filter;
       });
     });
@@ -88,6 +93,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
   return (
     <div className="w-full flex flex-col gap-2 max-w-[1600px] mx-auto select-text pb-4">
       {/* Main Table Container */}
+      <ContainerSlot id="detalhamento_financeiro__tabela" layout={containerLayout} isPmo={isPmo}>
       <div className={`${containerBg} border p-3 flex flex-col`}>
         {/* Table Title Bar */}
         <div className={`flex flex-wrap items-center justify-between gap-2 mb-2 pb-1.5 border-b ${
@@ -249,6 +255,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
           </table>
         </div>
       </div>
+      </ContainerSlot>
     </div>
   );
 };

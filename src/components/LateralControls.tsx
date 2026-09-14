@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { X, ChevronRight, Menu, Filter, Check } from 'lucide-react';
-import { AppTheme } from '../types';
+import { AppTheme, DashboardPageKey, PageLayoutConfig } from '../types';
 
-export type DashboardPageKey = 'one_page' | 'pontos_atencao' | 'informacoes_gerais' | 'detalhamento_financeiro';
+export type { DashboardPageKey };
 
 export const DASHBOARD_PAGES: { key: DashboardPageKey; label: string }[] = [
   { key: 'one_page', label: 'One page' },
@@ -20,6 +20,7 @@ interface LateralControlsProps {
   selectedFilters: FilterSolutionType[];
   onFilterChange: (filters: FilterSolutionType[]) => void;
   theme?: AppTheme;
+  pages?: { key: DashboardPageKey; label: string }[];
 }
 
 export const LateralControls: React.FC<LateralControlsProps> = ({
@@ -27,7 +28,8 @@ export const LateralControls: React.FC<LateralControlsProps> = ({
   onSelectPage,
   selectedFilters,
   onFilterChange,
-  theme = 'neon'
+  theme = 'neon',
+  pages = DASHBOARD_PAGES
 }) => {
   // Navigation button collapse/expand state
   const [isNavPinned, setIsNavPinned] = useState(true);
@@ -149,7 +151,7 @@ export const LateralControls: React.FC<LateralControlsProps> = ({
             }`}>
               Ir para a página:
             </div>
-            {DASHBOARD_PAGES.map(page => {
+            {pages.map(page => {
               const active = currentPage === page.key;
               return (
                 <button

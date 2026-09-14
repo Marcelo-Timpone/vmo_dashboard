@@ -1,22 +1,27 @@
 import React, { useState, useMemo } from 'react';
 import { Maximize2, Minimize2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { SapProjectFinancial, AppTheme, ContainerParamSettings } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig } from '../types';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
 import { formatCurrencyBRL } from '../utils/dateUtils';
+import { ContainerSlot } from './ContainerSlot';
 
 interface GeneralInfoDashboardProps {
   projects: SapProjectFinancial[];
   selectedFilters: FilterSolutionType[];
   theme?: AppTheme;
   containerSettings?: ContainerParamSettings;
+  containerLayout?: ContainerLayoutConfig[];
+  isPmo?: boolean;
 }
 
 export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
   projects,
   selectedFilters,
   theme = 'neon',
-  containerSettings
+  containerSettings,
+  containerLayout,
+  isPmo = false
 }) => {
   // State for expanding/reducing any of the 4 containers to full screen
   const [expandedContainer, setExpandedContainer] = useState<1 | 2 | 3 | 4 | null>(null);
@@ -30,7 +35,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
     }
     return projects.filter(p => {
       return selectedFilters.some(filter => {
-        if (filter === 'SCP') return p.solution.includes('SCP');
+        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
         return p.solution === filter;
       });
     });
@@ -104,6 +109,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
         {/* CONTÊINER 1: PROJETOS COM MAIOR USO DE ORÇAMENTO                          */}
         {/* ========================================================================= */}
         {(expandedContainer === null || expandedContainer === 1) && (
+          <ContainerSlot id="informacoes_gerais__orcamento" layout={containerLayout} isPmo={isPmo}>
           <div className={`${cardBg} border p-3 flex flex-col justify-between transition-all duration-200 ${expandedContainer === 1 ? 'min-h-[550px]' : 'min-h-[290px]'}`}>
             <div>
               {/* Header */}
@@ -228,12 +234,14 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
               </button>
             </div>
           </div>
+          </ContainerSlot>
         )}
 
         {/* ========================================================================= */}
         {/* CONTÊINER 2: CRS EM ABERTO                                                */}
         {/* ========================================================================= */}
         {(expandedContainer === null || expandedContainer === 2) && (
+          <ContainerSlot id="informacoes_gerais__crs_abertos" layout={containerLayout} isPmo={isPmo}>
           <div className={`${cardBg} border p-3 flex flex-col justify-between transition-all duration-200 ${expandedContainer === 2 ? 'min-h-[550px]' : 'min-h-[290px]'}`}>
             <div>
               {/* Header */}
@@ -332,6 +340,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
               </button>
             </div>
           </div>
+          </ContainerSlot>
         )}
 
         {/* ========================================================================= */}
@@ -339,6 +348,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
         {/* 25% Quadrado com gráfico de rosca + 75% Tabela Projetos sem uso do ALM    */}
         {/* ========================================================================= */}
         {(expandedContainer === null || expandedContainer === 3) && (
+          <ContainerSlot id="informacoes_gerais__uso_alm" layout={containerLayout} isPmo={isPmo}>
           <div className={`${cardBg} border p-3 flex flex-col justify-between transition-all duration-200 ${expandedContainer === 3 ? 'min-h-[550px]' : 'min-h-[290px]'}`}>
             <div>
               {/* Header */}
@@ -517,12 +527,14 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
               </button>
             </div>
           </div>
+          </ContainerSlot>
         )}
 
         {/* ========================================================================= */}
         {/* CONTÊINER 4: AVALIAÇÕES                                                   */}
         {/* ========================================================================= */}
         {(expandedContainer === null || expandedContainer === 4) && (
+          <ContainerSlot id="informacoes_gerais__avaliacoes" layout={containerLayout} isPmo={isPmo}>
           <div className={`${cardBg} border p-3 flex flex-col justify-between transition-all duration-200 ${expandedContainer === 4 ? 'min-h-[550px]' : 'min-h-[290px]'}`}>
             <div>
               {/* Header */}
@@ -640,6 +652,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
               </button>
             </div>
           </div>
+          </ContainerSlot>
         )}
 
       </div>

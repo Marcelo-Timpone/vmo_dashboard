@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { SapProjectFinancial, VmoReferencePeriod, AppTheme, ContainerParamSettings } from '../types';
+import { SapProjectFinancial, VmoReferencePeriod, AppTheme, ContainerParamSettings, PageLayoutConfig, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
 import { exportToPdf, exportToPpt } from '../utils/exportUtils';
 import { isProjectActiveForReferencePeriod } from '../utils/dateUtils';
 import {
@@ -13,7 +13,7 @@ import { AttentionPointsDashboard } from './AttentionPointsDashboard';
 import { GeneralInfoDashboard } from './GeneralInfoDashboard';
 import { DetailedFinancialDashboard } from './DetailedFinancialDashboard';
 import { EmptyPagePlaceholder } from './EmptyPagePlaceholder';
-import { FileDown, Presentation, Calendar } from 'lucide-react';
+import { FileDown, Presentation, Calendar, EyeOff } from 'lucide-react';
 
 interface DashboardViewProps {
   projects: SapProjectFinancial[];
@@ -21,6 +21,9 @@ interface DashboardViewProps {
   isPmo: boolean;
   theme?: AppTheme;
   containerSettings?: ContainerParamSettings;
+  pageLayout?: PageLayoutConfig[];
+  containerLayout?: ContainerLayoutConfig[];
+  monthlyHistory?: MonthlyKpiSnapshot[];
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -28,12 +31,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   referencePeriod,
   isPmo,
   theme = 'neon',
-  containerSettings
+  containerSettings,
+  pageLayout,
+  containerLayout,
+  monthlyHistory
 }) => {
+  // Páginas visíveis para o usuário atual, já ordenadas conforme configurado
+  // em Configurações > Layout do Dashboard. Páginas ocultas só aparecem para PMO.
+  const visiblePages = useMemo(() => {
+    if (!pageLayout || pageLayout.length === 0) return DASHBOARD_PAGES;
+    return [...pageLayout]
+      .filter(p => isPmo || !p.hidden)
+      .sort((a, b) => a.order - b.order)
+      .map(p => ({ key: p.key, label: p.label, hidden: p.hidden }));
+  }, [pageLayout, isPmo]);
+
   // Active page key: 'one_page' | 'pontos_atencao' | 'informacoes_gerais' | 'detalhamento_financeiro'
-  const [currentPage, setCurrentPage] = useState<DashboardPageKey>('one_page');
+  const [currentPage, setCurrentPage] = useState<DashboardPageKey>(visiblePages[0]?.key || 'one_page');
   const [slideDirection, setSlideDirection] = useState<'down' | 'up'>('down');
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  // Se a página atual deixar de existir na lista visível (ex: foi ocultada
+  // enquanto o usuário navegava, ou o perfil mudou), volta para a primeira disponível.
+  useEffect(() => {
+    if (!visiblePages.some(p => p.key === currentPage) && visiblePages.length > 0) {
+      setCurrentPage(visiblePages[0].key);
+    }
+  }, [visiblePages, currentPage]);
 
   // Selected filters from lateral control
   const [selectedFilters, setSelectedFilters] = useState<FilterSolutionType[]>(['TODOS']);
@@ -67,12 +91,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const stageScrollRef = useRef<HTMLDivElement>(null);
 
-  const pageIndex = DASHBOARD_PAGES.findIndex(p => p.key === currentPage);
+  const pageIndex = visiblePages.findIndex(p => p.key === currentPage);
 
   // Function to navigate between pages
   const goToPageIndex = useCallback(
     (newIndex: number) => {
-      if (newIndex < 0 || newIndex >= DASHBOARD_PAGES.length) return;
+      if (newIndex < 0 || newIndex >= visiblePages.length) return;
       if (newIndex === pageIndex) return;
 
       bottomStreak.current = 0;
@@ -81,7 +105,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       setSlideDirection(newIndex > pageIndex ? 'down' : 'up');
       setIsTransitioning(true);
-      setCurrentPage(DASHBOARD_PAGES[newIndex].key);
+      setCurrentPage(visiblePages[newIndex].key);
 
       setTimeout(() => {
         setIsTransitioning(false);
@@ -140,7 +164,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
         lastBoundaryWheelTime.current = now;
 
-        if (pageIndex < DASHBOARD_PAGES.length - 1) {
+        if (pageIndex < visiblePages.length - 1) {
           if (bottomStreak.current >= 2) {
             bottomStreak.current = 0;
             setBoundaryNotice(null);
@@ -218,7 +242,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       // Horizontal arrows: immediate slide transition
       if (e.key === 'ArrowRight') {
-        if (pageIndex < DASHBOARD_PAGES.length - 1) {
+        if (pageIndex < visiblePages.length - 1) {
           e.preventDefault();
           goToPageIndex(pageIndex + 1);
         }
@@ -235,7 +259,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       // Vertical arrows: switch page only when boundary reached
       if ((e.key === 'ArrowDown' || e.key === 'PageDown') && isAtBottom) {
-        if (pageIndex < DASHBOARD_PAGES.length - 1) {
+        if (pageIndex < visiblePages.length - 1) {
           e.preventDefault();
           goToPageIndex(pageIndex + 1);
         }
@@ -271,6 +295,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               selectedFilters={selectedFilters}
               theme={theme}
               containerSettings={containerSettings}
+              containerLayout={containerLayout}
+              isPmo={isPmo}
+              monthlyHistory={monthlyHistory}
             />
           </div>
         );
@@ -286,6 +313,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               selectedFilters={selectedFilters}
               theme={theme}
               containerSettings={containerSettings}
+              containerLayout={containerLayout}
+              isPmo={isPmo}
             />
           </div>
         );
@@ -301,6 +330,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               selectedFilters={selectedFilters}
               theme={theme}
               containerSettings={containerSettings}
+              containerLayout={containerLayout}
+              isPmo={isPmo}
             />
           </div>
         );
@@ -319,6 +350,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               projects={dashboardProjects}
               selectedFilters={selectedFilters}
               theme={theme}
+              containerLayout={containerLayout}
+              isPmo={isPmo}
             />
           </div>
         );
@@ -339,33 +372,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Fixed Lateral Controls (Menu de navegação + Filtro 6 checkboxes) */}
       <LateralControls
         currentPage={currentPage}
-        onSelectPage={page => goToPageIndex(DASHBOARD_PAGES.findIndex(p => p.key === page))}
+        onSelectPage={page => goToPageIndex(visiblePages.findIndex(p => p.key === page))}
         selectedFilters={selectedFilters}
         onFilterChange={setSelectedFilters}
         theme={theme}
+        pages={visiblePages}
       />
 
       {/* Right Edge Floating Page Indicator Dots */}
       <div className="fixed right-3 top-1/2 -translate-y-1/2 z-40 flex flex-col gap-3 items-center no-print">
-        {DASHBOARD_PAGES.map((page, idx) => {
+        {visiblePages.map((page, idx) => {
           const isActive = idx === pageIndex;
+          const isHiddenFromOthers = isPmo && (page as any).hidden;
           return (
             <button
               key={page.key}
               type="button"
               onClick={() => goToPageIndex(idx)}
               className="group relative flex items-center justify-center cursor-pointer p-1 bg-transparent border-none"
-              title={`${page.label} (Página ${idx + 1})`}
+              title={`${page.label} (Página ${idx + 1})${isHiddenFromOthers ? ' — oculta para outros usuários' : ''}`}
             >
               <span
                 className={`transition-all rounded-full ${
                   isActive
                     ? 'w-3 h-3 bg-[#F26522]'
+                    : isHiddenFromOthers
+                    ? 'w-2 h-2 bg-amber-500/70 hover:bg-amber-400'
                     : 'w-2 h-2 bg-slate-600 hover:bg-slate-400'
                 }`}
               />
               {/* Tooltip label on hover */}
-              <span className="absolute right-6 opacity-0 group-hover:opacity-100 transition-opacity bg-[#06121E] border border-slate-700 text-slate-200 text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap pointer-events-none shadow-lg">
+              <span className="absolute right-6 opacity-0 group-hover:opacity-100 transition-opacity bg-[#06121E] border border-slate-700 text-slate-200 text-[10px] font-semibold px-2 py-0.5 whitespace-nowrap pointer-events-none shadow-lg flex items-center gap-1">
+                {isHiddenFromOthers && <EyeOff size={10} className="text-amber-500" />}
                 {page.label}
               </span>
             </button>

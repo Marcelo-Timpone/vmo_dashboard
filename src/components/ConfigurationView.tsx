@@ -12,7 +12,11 @@ import {
   ClientInfo,
   ContainerParamSettings,
   AppTheme,
-  ProjectStatus
+  ProjectStatus,
+  UserSession,
+  PageLayoutConfig,
+  ContainerLayoutConfig,
+  MonthlyKpiSnapshot
 } from '../types';
 import { exportStateToJson, exportToExcel, exportToCsv, getJsonExportFilename } from '../utils/exportUtils';
 import { calculateVmoReferencePeriod } from '../utils/dateUtils';
@@ -33,6 +37,9 @@ import {
 import { INITIAL_SUPABASE_USERS, INITIAL_CLIENTS, INITIAL_PROJECTS } from '../data/initialData';
 import { ContainersConfigSection, DEFAULT_CONTAINER_SETTINGS } from './ContainersConfigSection';
 import { ClientsConfigSection } from './ClientsConfigSection';
+import { UsersConfigSection } from './UsersConfigSection';
+import { LayoutConfigSection } from './LayoutConfigSection';
+import { MonthlyHistoryConfigSection } from './MonthlyHistoryConfigSection';
 import { ClientLogo } from './ClientLogo';
 
 interface ConfigurationViewProps {
@@ -53,6 +60,13 @@ interface ConfigurationViewProps {
   onThemeChange?: (theme: AppTheme) => void;
   localDosDados?: string;
   onUpdateLocalDosDados?: (link: string) => void;
+  session: UserSession;
+  pageLayout: PageLayoutConfig[];
+  containerLayout: ContainerLayoutConfig[];
+  onUpdatePageLayout: (layout: PageLayoutConfig[]) => void;
+  onUpdateContainerLayout: (layout: ContainerLayoutConfig[]) => void;
+  monthlyHistory: MonthlyKpiSnapshot[];
+  onUpdateMonthlyHistory: (history: MonthlyKpiSnapshot[]) => void;
 }
 
 export const DEFAULT_APP_INSTRUCOES = `Atualize os dados do dashboard com as informações presentes na URL do mês de referência. Se você não tem um mês específico que busca, verifique a data atual e encontre o dados desde o dia 02 do mês atual, até o presente momento. Caso seja o primeiro dia do mês atual, deve ser considerada a data referência desde o dia 02 do mês anterior.
@@ -79,10 +93,17 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
   theme = 'neon',
   onThemeChange,
   localDosDados: propLocalDosDados = '',
-  onUpdateLocalDosDados
+  onUpdateLocalDosDados,
+  session,
+  pageLayout,
+  containerLayout,
+  onUpdatePageLayout,
+  onUpdateContainerLayout,
+  monthlyHistory,
+  onUpdateMonthlyHistory
 }) => {
   const [activeSection, setActiveSection] = useState<
-    'containers' | 'clients' | 'sharepoint' | 'upload' | 'projects' | 'period' | 'migration' | 'demonstrativo' | 'usuarios'
+    'containers' | 'clients' | 'sharepoint' | 'upload' | 'projects' | 'period' | 'migration' | 'demonstrativo' | 'usuarios' | 'layout' | 'historico'
   >('containers');
 
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError?: boolean } | null>(null);
@@ -289,11 +310,22 @@ DIRETRIZ MANDATÓRIA:
   const handleZerarDadosAtuais = () => {
     try {
       localStorage.setItem('vmo_exed_projects_cleared', 'true');
+      localStorage.setItem('vmo_exed_clients_cleared', 'true');
       localStorage.setItem('vmo_exed_projects_v5', JSON.stringify([]));
+      localStorage.setItem('vmo_exed_clients_v1', JSON.stringify([]));
     } catch {}
     onUpdateProjects([]);
-    syncVmoServerState({ projects: [] });
-    showNotification('Todos os dados atuais do webapp foram zerados com sucesso (0 projetos).');
+    onUpdateClients([]);
+    syncVmoServerState({ projects: [], clients: [] }).then(res => {
+      if (res.success) {
+        showNotification('Todos os dados atuais do webapp foram zerados com sucesso (0 projetos, 0 clientes).');
+      } else {
+        showNotification(
+          `Os dados foram zerados aqui na tela, mas houve falha ao salvar no servidor: ${res.error || 'erro desconhecido'}. Tente novamente ou verifique a conexão/chave de API.`,
+          true
+        );
+      }
+    });
   };
 
   const handleCarregarDadosDemonstrativos = () => {
@@ -307,13 +339,22 @@ DIRETRIZ MANDATÓRIA:
     }));
     try {
       localStorage.removeItem('vmo_exed_projects_cleared');
+      localStorage.removeItem('vmo_exed_clients_cleared');
       localStorage.setItem('vmo_exed_projects_v5', JSON.stringify(demoProjects));
       localStorage.setItem('vmo_exed_clients_v1', JSON.stringify(demoClients));
     } catch {}
     onUpdateProjects(demoProjects);
     onUpdateClients(demoClients);
-    syncVmoServerState({ projects: demoProjects, clients: demoClients });
-    showNotification(`Dados demonstrativos carregados com sucesso (${demoProjects.length} projetos SAP demonstrativos).`);
+    syncVmoServerState({ projects: demoProjects, clients: demoClients }).then(res => {
+      if (res.success) {
+        showNotification(`Dados demonstrativos carregados com sucesso (${demoProjects.length} projetos e ${demoClients.length} clientes demonstrativos).`);
+      } else {
+        showNotification(
+          `Os dados demonstrativos foram carregados aqui na tela, mas houve falha ao salvar no servidor: ${res.error || 'erro desconhecido'}.`,
+          true
+        );
+      }
+    });
   };
 
   const showNotification = (text: string, isError: boolean = false) => {
@@ -432,9 +473,9 @@ DIRETRIZ MANDATÓRIA:
 
     const clientMatch = clients.find(
       c =>
-        c.name.toLowerCase() === newProject.client?.toLowerCase() ||
-        c.shortName.toLowerCase() === newProject.client?.toLowerCase() ||
-        newProject.client?.toLowerCase().includes(c.shortName.toLowerCase())
+        c.name?.toLowerCase() === newProject.client?.toLowerCase() ||
+        c.shortName?.toLowerCase() === newProject.client?.toLowerCase() ||
+        (newProject.client && c.shortName && newProject.client.toLowerCase().includes(c.shortName.toLowerCase()))
     );
 
     const projectLogo = clientMatch ? clientMatch.logoUrl : (newProject.clientLogo || '/assets/logos/gerdau.png');
@@ -476,6 +517,7 @@ DIRETRIZ MANDATÓRIA:
             npsScore: Number(newProject.npsScore) || undefined,
             hasOpenCr: Boolean(newProject.hasOpenCr),
             crValue: newProject.hasOpenCr ? (Number(newProject.crValue) || 0) : undefined,
+            crOpenDate: newProject.hasOpenCr ? (newProject.crOpenDate || '') : undefined,
             crDescription: newProject.crDescription || '',
             reimbursableExpenseTotal: Number(newProject.reimbursableExpenseTotal) || 0,
             plannedResources: Number(newProject.plannedResources) || undefined,
@@ -519,6 +561,7 @@ DIRETRIZ MANDATÓRIA:
         npsScore: Number(newProject.npsScore) || 9.5,
         hasOpenCr: Boolean(newProject.hasOpenCr),
         crValue: newProject.hasOpenCr ? (Number(newProject.crValue) || 0) : undefined,
+        crOpenDate: newProject.hasOpenCr ? (newProject.crOpenDate || '') : undefined,
         crDescription: newProject.crDescription || '',
         reimbursableExpenseTotal: Number(newProject.reimbursableExpenseTotal) || 0,
         plannedResources: Number(newProject.plannedResources) || 12,
@@ -941,6 +984,28 @@ DIRETRIZ MANDATÓRIA:
         >
           USUÁRIOS
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('layout')}
+          className={`px-3 py-1.5 font-bold cursor-pointer border ${
+            activeSection === 'layout'
+              ? 'bg-[#0B2240] text-white border-[#0B2240]'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+          }`}
+        >
+          LAYOUT DO DASHBOARD
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSection('historico')}
+          className={`px-3 py-1.5 font-bold cursor-pointer border ${
+            activeSection === 'historico'
+              ? 'bg-[#0B2240] text-white border-[#0B2240]'
+              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+          }`}
+        >
+          HISTÓRICO MENSAL
+        </button>
       </div>
 
       {/* ========================================================================= */}
@@ -1197,7 +1262,7 @@ DIRETRIZ MANDATÓRIA:
                   value={newProject.client || ''}
                   onChange={e => {
                     const val = e.target.value;
-                    const matched = clients.find(c => c.name.toLowerCase() === val.toLowerCase() || c.shortName.toLowerCase() === val.toLowerCase());
+                    const matched = clients.find(c => c.name?.toLowerCase() === val.toLowerCase() || c.shortName?.toLowerCase() === val.toLowerCase());
                     setNewProject(prev => ({
                       ...prev,
                       client: val,
@@ -1432,8 +1497,8 @@ DIRETRIZ MANDATÓRIA:
               </div>
             </div>
 
-            {/* Bloco 5: CRs, Gasto Reembolsável e Notas */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-200">
+            {/* Bloco 5: CRs, Gasto Reembolsável, Pendências e Notas */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1 border-t border-slate-200">
               <div>
                 <label className="inline-flex items-center gap-1.5 font-semibold text-slate-700 mb-1 cursor-pointer">
                   <input
@@ -1454,6 +1519,12 @@ DIRETRIZ MANDATÓRIA:
                       className="w-full p-1.5 border border-slate-300 text-xs font-mono bg-white text-slate-900"
                     />
                     <input
+                      type="date"
+                      value={newProject.crOpenDate || ''}
+                      onChange={e => setNewProject({ ...newProject, crOpenDate: e.target.value })}
+                      className="w-full p-1.5 border border-slate-300 text-xs font-mono bg-white text-slate-900"
+                    />
+                    <input
                       type="text"
                       value={newProject.crDescription || ''}
                       onChange={e => setNewProject({ ...newProject, crDescription: e.target.value })}
@@ -1462,6 +1533,18 @@ DIRETRIZ MANDATÓRIA:
                     />
                   </div>
                 )}
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Pendências (nº):</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={newProject.pendenciesCount ?? 0}
+                  onChange={e => setNewProject({ ...newProject, pendenciesCount: Number(e.target.value) })}
+                  placeholder="Ex: 3"
+                  className="w-full p-1.5 border border-slate-300 text-xs font-mono bg-white text-slate-900"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Não vem da planilha RSE — preencha manualmente.</p>
               </div>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Total Gasto Reembolsável (R$):</label>
@@ -1526,7 +1609,7 @@ DIRETRIZ MANDATÓRIA:
                 {projects.map(p => {
                   const logoUrl =
                     p.clientLogo ||
-                    clients.find(c => c.name === p.client || p.client.includes(c.shortName))?.logoUrl;
+                    clients.find(c => c.name === p.client || (p.client && c.shortName && p.client.includes(c.shortName)))?.logoUrl;
 
                   const isBeingEdited = editingProjectId === p.id;
 
@@ -1880,7 +1963,7 @@ DIRETRIZ MANDATÓRIA:
               onClick={handleZerarDadosAtuais}
               className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer border-none text-xs transition-colors"
             >
-              Zerar Dados Atuais
+              Zerar Dados Atuais (Projetos e Clientes)
             </button>
 
             <button
@@ -1897,17 +1980,22 @@ DIRETRIZ MANDATÓRIA:
       {/* ========================================================================= */}
       {/* SECTION 9: USUÁRIOS */}
       {/* ========================================================================= */}
-      {activeSection === 'usuarios' && (
-        <div className="bg-white border border-slate-300 p-4" id="usuarios-config-panel">
-          <div className="border border-slate-200 divide-y divide-slate-200">
-            <div className="p-3 bg-white flex items-center justify-between">
-              <span className="font-mono font-bold text-slate-800 text-xs">PMO@exedconsulting.com</span>
-            </div>
-            <div className="p-3 bg-white flex items-center justify-between">
-              <span className="font-mono font-bold text-slate-800 text-xs">demonstrativo@exedconsulting.com</span>
-            </div>
-          </div>
-        </div>
+      {activeSection === 'usuarios' && <UsersConfigSection session={session} />}
+
+      {activeSection === 'layout' && (
+        <LayoutConfigSection
+          pageLayout={pageLayout}
+          containerLayout={containerLayout}
+          onUpdatePageLayout={onUpdatePageLayout}
+          onUpdateContainerLayout={onUpdateContainerLayout}
+        />
+      )}
+
+      {activeSection === 'historico' && (
+        <MonthlyHistoryConfigSection
+          monthlyHistory={monthlyHistory}
+          onUpdateMonthlyHistory={onUpdateMonthlyHistory}
+        />
       )}
     </div>
   );

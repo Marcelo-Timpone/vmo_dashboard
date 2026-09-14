@@ -9,7 +9,6 @@ interface HeaderProps {
   session: UserSession | null;
   referencePeriod?: VmoReferencePeriod;
   onLogout: () => void;
-  onSwitchRole: () => void;
   theme?: AppTheme;
   onThemeChange?: (theme: AppTheme) => void;
 }
@@ -20,7 +19,6 @@ export const Header: React.FC<HeaderProps> = ({
   session,
   referencePeriod,
   onLogout,
-  onSwitchRole,
   theme = 'neon',
   onThemeChange
 }) => {
@@ -51,17 +49,8 @@ export const Header: React.FC<HeaderProps> = ({
               <>
                 <div className="flex items-center gap-1.5 text-slate-300">
                   <span className="text-slate-400">Usuário:</span>
-                  <strong className="text-white font-semibold">{session.username}</strong>
+                  <strong className="text-white font-semibold">{session.name || session.username}</strong>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={onSwitchRole}
-                  className="px-2.5 py-1 bg-[#0C2442] hover:bg-[#123661] text-slate-200 hover:text-white border border-slate-700 font-medium cursor-pointer transition-colors"
-                  title="Alternar perfil de acesso"
-                >
-                  Alternar para Demonstrativo
-                </button>
 
                 {/* Opções de Tema para o Mockup Demonstrativo ao lado do botão Sair */}
                 {onThemeChange && (

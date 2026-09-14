@@ -1,118 +1,42 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
-import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import { loadState, saveState, applyIncomingUpdates } from './lib/vmoState';
 import {
-  INITIAL_PROJECTS,
-  INITIAL_CLIENTS,
-  INITIAL_WIDGETS,
-  INITIAL_SHAREPOINT_LINKS,
-  DEFAULT_CONTAINER_SETTINGS
-} from './src/data/initialData';
-import { calculateVmoReferencePeriod } from './src/utils/dateUtils';
+  getConfiguredApiKey,
+  isAuthorized,
+  sendUnauthorized,
+  setCorsHeaders,
+  CORPORATE_DEFAULT_API_KEY
+} from './lib/apiAuth';
 import {
-  SapProjectFinancial,
-  ClientInfo,
-  DashboardWidgetConfig,
-  SharePointFolderLink,
-  ContainerParamSettings,
-  VmoReferencePeriod,
-  AppTheme
-} from './src/types';
+  findUserByUsername,
+  verifyPassword,
+  signSession,
+  toPublicUser,
+  requirePmoSession,
+  getSessionFromRequest,
+  listUsers,
+  createUser,
+  updateUser,
+  deleteUser
+} from './lib/auth';
 
 // ==============================================================================
-// CONFIGURAÇÕES DA API CORPORATIVA EXED PARA O CLAUDE
+// SERVIDOR EXPRESS — USADO APENAS PARA DESENVOLVIMENTO LOCAL (`npm run dev`)
 // ==============================================================================
+// Em produção (Vercel), estas mesmas rotas são servidas por Serverless
+// Functions em /api/vmo/*.ts, que reaproveitam a mesma lógica de
+// ./lib/vmoState.ts e ./lib/apiAuth.ts — garantindo que o comportamento local
+// e o de produção sejam idênticos.
 const PORT = 3000;
-const CORPORATE_DEFAULT_API_KEY = 'exed_claude_vmo_live_sec_key_2026';
-const DATA_FILE_PATH = path.join(process.cwd(), 'data', 'vmo_server_state.json');
 
-// Interface do Estado do Servidor
-interface ServerVmoState {
-  instrucoesPreenchimento: string;
-  localDosDados: string;
-  projects: SapProjectFinancial[];
-  clients: ClientInfo[];
-  widgets: DashboardWidgetConfig[];
-  sharePointLinks: SharePointFolderLink[];
-  containerSettings: ContainerParamSettings;
-  referencePeriod: VmoReferencePeriod;
-  theme: AppTheme;
-  lastSaved: string;
-  updatedBy?: string;
-}
-
-export const DEFAULT_INSTRUCOES_PREENCHIMENTO = `Atualize os dados do dashboard com as informações presentes na URL do mês de referência. Se você não tem um mês específico que busca, verifique a data atual e encontre o dados desde o dia 02 do mês atual, até o presente momento. Caso seja o primeiro dia do mês atual, deve ser considerada a data referência desde o dia 02 do mês anterior.
-Todas as informações necessárias estão no Link 2 e a última versão atualizada dos dados está no link 1.
-Realize o fluxo: 
-(1) Acesse o link 2, acesse o mês de referência, acesse a primeira pasta em ordem alfabética, acesse as pastas Dashboard - GROW + DSC e Dashboard - RISE + FSW, leia todas as planilhas dentro de cada uma dessas pastas. 
-(2) Repita esse fluxo até ler todas as pastas dentro do mês de referência.
-(3) Atualize as informações do webapp de acordo com as leituras de todos os documentos.`;
-
-// Inicializador do Estado em Disco / Memória
-function getInitialState(): ServerVmoState {
-  try {
-    if (fs.existsSync(DATA_FILE_PATH)) {
-      const raw = fs.readFileSync(DATA_FILE_PATH, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (parsed && Array.isArray(parsed.projects)) {
-        return {
-          ...parsed,
-          sharePointLinks: INITIAL_SHAREPOINT_LINKS,
-          instrucoesPreenchimento: parsed.instrucoesPreenchimento || DEFAULT_INSTRUCOES_PREENCHIMENTO
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('Não foi possível ler o arquivo de dados persistidos, usando dados padrão:', err);
-  }
-
-  const defaultState: ServerVmoState = {
-    instrucoesPreenchimento: DEFAULT_INSTRUCOES_PREENCHIMENTO,
-    localDosDados: '',
-    projects: INITIAL_PROJECTS,
-    clients: INITIAL_CLIENTS,
-    widgets: INITIAL_WIDGETS,
-    sharePointLinks: INITIAL_SHAREPOINT_LINKS,
-    containerSettings: DEFAULT_CONTAINER_SETTINGS,
-    referencePeriod: calculateVmoReferencePeriod(new Date()),
-    theme: 'neon',
-    lastSaved: new Date().toISOString(),
-    updatedBy: 'sistema-inicial'
-  };
-
-  saveStateToDisk(defaultState);
-  return defaultState;
-}
-
-function saveStateToDisk(state: ServerVmoState) {
-  try {
-    const dir = path.dirname(DATA_FILE_PATH);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(state, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Erro ao persistir vmo_server_state.json no disco:', err);
-  }
-}
-
-let vmoState: ServerVmoState = getInitialState();
-
-// ==============================================================================
-// INICIALIZAÇÃO DO SERVIDOR EXPRESS COM VITE MIDDLEWARE
-// ==============================================================================
 async function startServer() {
   const app = express();
 
-  // CORS headers para permitir chamadas do Claude / MCP / agentes corporativos
+  // CORS para permitir chamadas do Claude / MCP / agentes corporativos
   app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.header(
-      'Access-Control-Allow-Headers',
-      'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-api-key, X-API-Key'
-    );
+    setCorsHeaders(res);
     if (req.method === 'OPTIONS') {
       return res.sendStatus(200);
     }
@@ -125,7 +49,6 @@ async function startServer() {
   // MIDDLEWARE DE AUTENTICAÇÃO POR API KEY
   // ============================================================================
   const apiKeyMiddleware = (req: Request, res: Response, next: NextFunction) => {
-    // Rotas públicas de status e documentação
     if (
       req.path === '/api/vmo/health' ||
       req.path === '/api/vmo/openapi.json' ||
@@ -134,39 +57,11 @@ async function startServer() {
       return next();
     }
 
-    const configuredKey = (process.env.EXED_API_KEY || CORPORATE_DEFAULT_API_KEY).trim();
-    
-    // Extração do cabeçalho
-    const headerKey = (req.headers['x-api-key'] || req.headers['X-API-Key'] || req.headers['x-api-key'.toLowerCase()]) as string | undefined;
-    const authHeader = req.headers['authorization'] as string | undefined;
-    const queryKey = req.query.apiKey as string | undefined;
-
-    let providedKey = '';
-    if (headerKey && typeof headerKey === 'string') {
-      providedKey = headerKey.trim();
-    } else if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-      providedKey = authHeader.substring(7).trim();
-    } else if (queryKey && typeof queryKey === 'string') {
-      providedKey = queryKey.trim();
-    }
-
-    // Permitir requisições GET internas originadas do próprio frontend local
-    const referer = (req.headers['referer'] || '') as string;
-    const host = (req.headers['host'] || '') as string;
-    const isSameOriginGet = req.method === 'GET' && host && referer.includes(host);
-
-    if (providedKey === configuredKey || isSameOriginGet) {
+    if (isAuthorized(req)) {
       return next();
     }
 
-    return res.status(401).json({
-      sucesso: false,
-      erro: 'Acesso Não Autorizado',
-      mensagem:
-        "API Key corporativa inválida ou ausente. Forneça o cabeçalho 'x-api-key: <CHAVE>' ou 'Authorization: Bearer <CHAVE>'.",
-      chave_padrao_sugerida: CORPORATE_DEFAULT_API_KEY,
-      documentacao: '/api/vmo/openapi.json'
-    });
+    return sendUnauthorized(res);
   };
 
   // ============================================================================
@@ -174,24 +69,24 @@ async function startServer() {
   // ============================================================================
 
   // 1. Health & Status
-  app.get('/api/vmo/health', (_req, res) => {
+  app.get('/api/vmo/health', async (_req, res) => {
+    const state = await loadState();
     res.json({
       status: 'online',
       projeto: 'Exed Consulting - VMO Corporativo',
       versao_api: '1.0-claude-ready',
       timestamp: new Date().toISOString(),
       autenticacao: 'API Key (x-api-key ou Bearer)',
-      projetos_cadastrados: vmoState.projects.length,
-      sharepoint_configurado: !!vmoState.localDosDados
+      projetos_cadastrados: state.projects.length,
+      sharepoint_configurado: !!state.localDosDados
     });
   });
 
   // 2. Info da chave e endpoints (para exibição no webapp)
   app.get('/api/vmo/key-info', (_req, res) => {
-    const activeKey = (process.env.EXED_API_KEY || CORPORATE_DEFAULT_API_KEY).trim();
     res.json({
       sucesso: true,
-      apiKey: activeKey,
+      apiKey: getConfiguredApiKey(),
       endpoints: {
         estado_completo: '/api/vmo/state',
         apenas_instrucoes: '/api/vmo/instructions',
@@ -205,134 +100,73 @@ async function startServer() {
   });
 
   // 3. GET /api/vmo/state (LEITURA COMPLETA DO WEBAPP)
-  // O Claude lê tudo o que existe no webapp com destaque obrigatório para as instruções e local dos dados
-  app.get('/api/vmo/state', apiKeyMiddleware, (_req, res) => {
-    const totalOrcado = vmoState.projects.reduce((acc, p) => acc + (p.budgetPlanned || 0), 0);
-    const totalRealizado = vmoState.projects.reduce((acc, p) => acc + (p.budgetRealized || 0), 0);
-    const totalFaturado = vmoState.projects.reduce((acc, p) => acc + (p.billed || 0), 0);
+  app.get('/api/vmo/state', apiKeyMiddleware, async (_req, res) => {
+    const state = await loadState();
+    const totalOrcado = state.projects.reduce((acc, p) => acc + (p.budgetPlanned || 0), 0);
+    const totalRealizado = state.projects.reduce((acc, p) => acc + (p.budgetRealized || 0), 0);
+    const totalFaturado = state.projects.reduce((acc, p) => acc + (p.billed || 0), 0);
     const desvioGeral = totalOrcado > 0 ? ((totalRealizado - totalOrcado) / totalOrcado) * 100 : 0;
 
     res.json({
       sucesso: true,
       DIRETRIZ_OBRIGATORIA_CLAUDE:
         "IMPORTANTE: Leia sempre 'INSTRUCOES_PARA_PREENCHIMENTO' e o Link 1 (Histórico de versões do webapp em JASON) primeiro antes de qualquer alteração. A última versão dos dados do webapp está no Link 1, identificável pelo padrão de data ANO, MÊS, DIA no nome do arquivo. Todas as informações necessárias estão no Link 2 e na pasta do mês de referência.",
-      INSTRUCOES_PARA_PREENCHIMENTO: vmoState.instrucoesPreenchimento || '',
-      LOCAL_DOS_DADOS: vmoState.localDosDados || '',
+      INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '',
+      LOCAL_DOS_DADOS: state.localDosDados || '',
       resumo_executivo: {
-        total_projetos: vmoState.projects.length,
+        total_projetos: state.projects.length,
         total_orcado_brl: totalOrcado,
         total_realizado_brl: totalRealizado,
         total_faturado_brl: totalFaturado,
         desvio_custo_consolidado_percentual: Number(desvioGeral.toFixed(2)),
-        periodo_referencia: vmoState.referencePeriod
+        periodo_referencia: state.referencePeriod
       },
       dados: {
-        instrucoes_preenchimento: vmoState.instrucoesPreenchimento || '',
-        local_dos_dados: vmoState.localDosDados || '',
-        projetos: vmoState.projects,
-        clientes: vmoState.clients,
-        configuracao_conteineres: vmoState.containerSettings,
-        links_sharepoint: vmoState.sharePointLinks,
-        widgets: vmoState.widgets,
-        periodo_referencia: vmoState.referencePeriod,
-        tema: vmoState.theme,
-        ultima_atualizacao: vmoState.lastSaved,
-        atualizado_por: vmoState.updatedBy || 'sistema'
+        instrucoes_preenchimento: state.instrucoesPreenchimento || '',
+        local_dos_dados: state.localDosDados || '',
+        projetos: state.projects,
+        clientes: state.clients,
+        configuracao_conteineres: state.containerSettings,
+        links_sharepoint: state.sharePointLinks,
+        widgets: state.widgets,
+        periodo_referencia: state.referencePeriod,
+        tema: state.theme,
+        layout_paginas: state.pageLayout,
+        layout_conteineres: state.containerLayout,
+        historico_mensal: state.monthlyHistory,
+        ultima_atualizacao: state.lastSaved,
+        atualizado_por: state.updatedBy || 'sistema'
       },
-      // Compatibilidade direta com nomes em inglês
-      projects: vmoState.projects,
-      clients: vmoState.clients,
-      widgets: vmoState.widgets,
-      sharePointLinks: vmoState.sharePointLinks,
-      containerSettings: vmoState.containerSettings,
-      referencePeriod: vmoState.referencePeriod,
-      theme: vmoState.theme,
-      lastSaved: vmoState.lastSaved
+      projects: state.projects,
+      clients: state.clients,
+      widgets: state.widgets,
+      sharePointLinks: state.sharePointLinks,
+      containerSettings: state.containerSettings,
+      referencePeriod: state.referencePeriod,
+      theme: state.theme,
+      pageLayout: state.pageLayout,
+      containerLayout: state.containerLayout,
+      monthlyHistory: state.monthlyHistory,
+      lastSaved: state.lastSaved
     });
   });
 
-  // 4. POST / PUT /api/vmo/state (ESCRITA TOTAL OU PARCIAL PELO CLAUDE)
-  const handleUpdateState = (req: Request, res: Response) => {
+  // 4. POST / PUT / PATCH /api/vmo/state (ESCRITA TOTAL OU PARCIAL PELO CLAUDE)
+  const handleUpdateState = async (req: Request, res: Response) => {
     try {
-      const body = req.body || {};
+      const state = await loadState();
+      applyIncomingUpdates(state, req.body || {});
+      state.updatedBy = req.headers['x-api-key'] ? 'claude-api' : 'usuario-webapp';
 
-      // 1. Atualizar Instruções para Preenchimento se fornecido
-      if (typeof body.INSTRUCOES_PARA_PREENCHIMENTO === 'string') {
-        vmoState.instrucoesPreenchimento = body.INSTRUCOES_PARA_PREENCHIMENTO;
-      } else if (typeof body.instrucoesPreenchimento === 'string') {
-        vmoState.instrucoesPreenchimento = body.instrucoesPreenchimento;
-      } else if (typeof body.instrucoes_preenchimento === 'string') {
-        vmoState.instrucoesPreenchimento = body.instrucoes_preenchimento;
-      }
-
-      // 2. Atualizar Local dos Dados (SharePoint) se fornecido
-      if (typeof body.LOCAL_DOS_DADOS === 'string') {
-        vmoState.localDosDados = body.LOCAL_DOS_DADOS;
-      } else if (typeof body.localDosDados === 'string') {
-        vmoState.localDosDados = body.localDosDados;
-      } else if (typeof body.local_dos_dados === 'string') {
-        vmoState.localDosDados = body.local_dos_dados;
-      }
-
-      // 3. Atualizar Projetos se fornecido
-      const incomingProjects = body.projects || body.projetos || body.dados?.projetos;
-      if (Array.isArray(incomingProjects)) {
-        vmoState.projects = incomingProjects;
-      }
-
-      // 4. Atualizar Clientes se fornecido
-      const incomingClients = body.clients || body.clientes || body.dados?.clientes;
-      if (Array.isArray(incomingClients)) {
-        vmoState.clients = incomingClients;
-      }
-
-      // 5. Atualizar Configurações de Contêineres se fornecido
-      const incomingContainers = body.containerSettings || body.configuracao_conteineres || body.dados?.configuracao_conteineres;
-      if (incomingContainers && typeof incomingContainers === 'object') {
-        vmoState.containerSettings = {
-          ...vmoState.containerSettings,
-          ...incomingContainers
-        };
-      }
-
-      // 6. Atualizar Links do SharePoint se fornecido
-      const incomingLinks = body.sharePointLinks || body.links_sharepoint || body.dados?.links_sharepoint;
-      if (Array.isArray(incomingLinks)) {
-        vmoState.sharePointLinks = incomingLinks;
-      }
-
-      // 7. Atualizar Widgets se fornecido
-      const incomingWidgets = body.widgets || body.dados?.widgets;
-      if (Array.isArray(incomingWidgets)) {
-        vmoState.widgets = incomingWidgets;
-      }
-
-      // 8. Atualizar Período de Referência se fornecido
-      const incomingPeriod = body.referencePeriod || body.periodo_referencia || body.dados?.periodo_referencia;
-      if (incomingPeriod && typeof incomingPeriod === 'object') {
-        vmoState.referencePeriod = {
-          ...vmoState.referencePeriod,
-          ...incomingPeriod
-        };
-      }
-
-      // 9. Atualizar Tema se fornecido
-      if (body.theme || body.tema) {
-        vmoState.theme = body.theme || body.tema;
-      }
-
-      vmoState.lastSaved = new Date().toISOString();
-      vmoState.updatedBy = (req.headers['x-api-key'] ? 'claude-api' : 'usuario-webapp');
-
-      saveStateToDisk(vmoState);
+      await saveState(state);
 
       return res.json({
         sucesso: true,
         mensagem: 'Estado do VMO atualizado com sucesso no webapp.',
-        INSTRUCOES_PARA_PREENCHIMENTO: vmoState.instrucoesPreenchimento,
-        LOCAL_DOS_DADOS: vmoState.localDosDados,
-        total_projetos: vmoState.projects.length,
-        ultima_atualizacao: vmoState.lastSaved
+        INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento,
+        LOCAL_DOS_DADOS: state.localDosDados,
+        total_projetos: state.projects.length,
+        ultima_atualizacao: state.lastSaved
       });
     } catch (err: any) {
       return res.status(500).json({
@@ -348,45 +182,48 @@ async function startServer() {
   app.patch('/api/vmo/state', apiKeyMiddleware, handleUpdateState);
 
   // 5. GET e PUT para /api/vmo/instructions (Atalho focado)
-  app.get('/api/vmo/instructions', apiKeyMiddleware, (_req, res) => {
+  app.get('/api/vmo/instructions', apiKeyMiddleware, async (_req, res) => {
+    const state = await loadState();
     res.json({
       sucesso: true,
       DIRETRIZ_OBRIGATORIA_CLAUDE:
         "IMPORTANTE: Leia sempre 'INSTRUCOES_PARA_PREENCHIMENTO' e 'LOCAL_DOS_DADOS' primeiro antes de realizar qualquer operação, a não ser que o usuário da empresa determine expressamente outra instrução.",
-      INSTRUCOES_PARA_PREENCHIMENTO: vmoState.instrucoesPreenchimento || '',
-      LOCAL_DOS_DADOS: vmoState.localDosDados || '',
-      ultima_atualizacao: vmoState.lastSaved
+      INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '',
+      LOCAL_DOS_DADOS: state.localDosDados || '',
+      ultima_atualizacao: state.lastSaved
     });
   });
 
-  app.put('/api/vmo/instructions', apiKeyMiddleware, (req, res) => {
+  app.put('/api/vmo/instructions', apiKeyMiddleware, async (req, res) => {
+    const state = await loadState();
     const { instrucoesPreenchimento, INSTRUCOES_PARA_PREENCHIMENTO, localDosDados, LOCAL_DOS_DADOS } = req.body || {};
+
     if (typeof INSTRUCOES_PARA_PREENCHIMENTO === 'string') {
-      vmoState.instrucoesPreenchimento = INSTRUCOES_PARA_PREENCHIMENTO;
+      state.instrucoesPreenchimento = INSTRUCOES_PARA_PREENCHIMENTO;
     } else if (typeof instrucoesPreenchimento === 'string') {
-      vmoState.instrucoesPreenchimento = instrucoesPreenchimento;
+      state.instrucoesPreenchimento = instrucoesPreenchimento;
     }
 
     if (typeof LOCAL_DOS_DADOS === 'string') {
-      vmoState.localDosDados = LOCAL_DOS_DADOS;
+      state.localDosDados = LOCAL_DOS_DADOS;
     } else if (typeof localDosDados === 'string') {
-      vmoState.localDosDados = localDosDados;
+      state.localDosDados = localDosDados;
     }
 
-    vmoState.lastSaved = new Date().toISOString();
-    saveStateToDisk(vmoState);
+    await saveState(state);
 
     res.json({
       sucesso: true,
       mensagem: 'Instruções e Local dos Dados atualizados com sucesso.',
-      INSTRUCOES_PARA_PREENCHIMENTO: vmoState.instrucoesPreenchimento,
-      LOCAL_DOS_DADOS: vmoState.localDosDados,
-      ultima_atualizacao: vmoState.lastSaved
+      INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento,
+      LOCAL_DOS_DADOS: state.localDosDados,
+      ultima_atualizacao: state.lastSaved
     });
   });
 
   // 6. GET /api/vmo/claude-context (Formato perfeito para o System Prompt do Claude)
-  app.get('/api/vmo/claude-context', apiKeyMiddleware, (_req, res) => {
+  app.get('/api/vmo/claude-context', apiKeyMiddleware, async (_req, res) => {
+    const state = await loadState();
     res.json({
       papel: 'Assistente Corporativo Exed Consulting - VMO',
       diretrizes_obrigatorias: [
@@ -395,9 +232,9 @@ async function startServer() {
         "3. Ao fazer alterações de valores (orçado, realizado, faturado), mantenha a integridade dos cálculos (desvios de custo, margem estimada e tags de tráfego verde/amarelo/vermelho).",
         "4. Qualquer modificação enviada para POST /api/vmo/state atualiza os dashboards do webapp instantaneamente."
       ],
-      INSTRUCOES_PARA_PREENCHIMENTO: vmoState.instrucoesPreenchimento || '(Nenhuma instrução específica informada no momento)',
-      LOCAL_DOS_DADOS: vmoState.localDosDados || '(Nenhum link do SharePoint configurado no momento)',
-      projetos_atuais: vmoState.projects.map(p => ({
+      INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '(Nenhuma instrução específica informada no momento)',
+      LOCAL_DOS_DADOS: state.localDosDados || '(Nenhum link do SharePoint configurado no momento)',
+      projetos_atuais: state.projects.map(p => ({
         codigo: p.code,
         nome: p.name,
         cliente: p.client,
@@ -416,16 +253,17 @@ async function startServer() {
   });
 
   // 7. GET /api/vmo/projects e POST /api/vmo/projects (Gestão granular de projetos)
-  app.get('/api/vmo/projects', apiKeyMiddleware, (req, res) => {
-    let list = [...vmoState.projects];
+  app.get('/api/vmo/projects', apiKeyMiddleware, async (req, res) => {
+    const state = await loadState();
+    let list = [...state.projects];
     if (req.query.solution) {
-      list = list.filter(p => p.solution.toLowerCase() === String(req.query.solution).toLowerCase());
+      list = list.filter(p => p.solution?.toLowerCase() === String(req.query.solution).toLowerCase());
     }
     if (req.query.tag) {
-      list = list.filter(p => p.trafficTag.toLowerCase() === String(req.query.tag).toLowerCase());
+      list = list.filter(p => p.trafficTag?.toLowerCase() === String(req.query.tag).toLowerCase());
     }
     if (req.query.client) {
-      list = list.filter(p => p.client.toLowerCase().includes(String(req.query.client).toLowerCase()));
+      list = list.filter(p => p.client?.toLowerCase().includes(String(req.query.client).toLowerCase()));
     }
     res.json({
       sucesso: true,
@@ -434,16 +272,17 @@ async function startServer() {
     });
   });
 
-  app.post('/api/vmo/projects', apiKeyMiddleware, (req, res) => {
+  app.post('/api/vmo/projects', apiKeyMiddleware, async (req, res) => {
+    const state = await loadState();
     const incoming = req.body;
     if (Array.isArray(incoming)) {
-      vmoState.projects = incoming;
+      state.projects = incoming;
     } else if (incoming && incoming.code) {
-      const idx = vmoState.projects.findIndex(p => p.code === incoming.code);
+      const idx = state.projects.findIndex(p => p.code === incoming.code);
       if (idx >= 0) {
-        vmoState.projects[idx] = { ...vmoState.projects[idx], ...incoming };
+        state.projects[idx] = { ...state.projects[idx], ...incoming };
       } else {
-        vmoState.projects.push(incoming);
+        state.projects.push(incoming);
       }
     } else {
       return res.status(400).json({
@@ -452,13 +291,12 @@ async function startServer() {
       });
     }
 
-    vmoState.lastSaved = new Date().toISOString();
-    saveStateToDisk(vmoState);
+    await saveState(state);
 
     res.json({
       sucesso: true,
       mensagem: 'Projetos atualizados com sucesso.',
-      total_projetos: vmoState.projects.length
+      total_projetos: state.projects.length
     });
   });
 
@@ -533,6 +371,76 @@ async function startServer() {
   });
 
   // ============================================================================
+  // AUTENTICAÇÃO REAL DE USUÁRIOS (login + gestão PMO)
+  // ============================================================================
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { username, password } = req.body || {};
+      if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Usuário e senha são obrigatórios.' });
+      }
+      const user = await findUserByUsername(String(username));
+      const invalidCredentialsResponse = () =>
+        res.status(401).json({ success: false, error: 'Usuário ou senha inválidos.' });
+      if (!user) return invalidCredentialsResponse();
+      const validPassword = await verifyPassword(String(password), user.passwordHash);
+      if (!validPassword) return invalidCredentialsResponse();
+      const token = signSession(user);
+      res.json({ success: true, token, user: toPublicUser(user) });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Erro interno ao autenticar.' });
+    }
+  });
+
+  app.all('/api/auth/users', async (req, res) => {
+    const session = requirePmoSession(req);
+    if (!session) {
+      const anySession = getSessionFromRequest(req);
+      if (!anySession) {
+        return res.status(401).json({ success: false, error: 'Sessão inválida ou expirada. Faça login novamente.' });
+      }
+      return res.status(403).json({
+        success: false,
+        error: 'Acesso restrito a usuários com perfil PMO. Faça login com uma conta PMO para gerenciar usuários.'
+      });
+    }
+
+    if (req.method === 'GET') {
+      const users = await listUsers();
+      return res.json({ success: true, users: users.map(toPublicUser) });
+    }
+
+    if (req.method === 'POST') {
+      const { username, password, name, role } = req.body || {};
+      const result = await createUser({ username, password, name, role });
+      if (!result.success) return res.status(400).json({ success: false, error: result.error });
+      return res.status(201).json({ success: true, user: toPublicUser(result.user!) });
+    }
+
+    if (req.method === 'PUT') {
+      const { id, name, role, password } = req.body || {};
+      if (!id) return res.status(400).json({ success: false, error: 'ID do usuário é obrigatório.' });
+      const result = await updateUser(id, { name, role, password });
+      if (!result.success) return res.status(400).json({ success: false, error: result.error });
+      return res.json({ success: true, user: toPublicUser(result.user!) });
+    }
+
+    if (req.method === 'DELETE') {
+      const id = req.body?.id || req.query?.id;
+      if (!id) return res.status(400).json({ success: false, error: 'ID do usuário é obrigatório.' });
+      if (id === session.sub) {
+        return res.status(400).json({ success: false, error: 'Você não pode excluir sua própria conta enquanto está logado com ela.' });
+      }
+      const result = await deleteUser(String(id));
+      if (!result.success) return res.status(400).json({ success: false, error: result.error });
+      return res.json({ success: true });
+    }
+
+    res.setHeader('Allow', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.status(405).json({ success: false, error: 'Método não permitido' });
+  });
+
+  // ============================================================================
   // VITE MIDDLEWARE (Desenvolvimento e Produção)
   // ============================================================================
   if (process.env.NODE_ENV !== 'production') {
@@ -552,6 +460,7 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Exed VMO Server] Servidor ativo em http://0.0.0.0:${PORT}`);
     console.log(`[Exed VMO Server] API pronta para o Claude em http://0.0.0.0:${PORT}/api/vmo/state`);
+    console.log(`[Exed VMO Server] Chave de API ativa: ${getConfiguredApiKey() === CORPORATE_DEFAULT_API_KEY ? '(padrão de fábrica — defina EXED_API_KEY para trocar)' : '(customizada via EXED_API_KEY)'}`);
   });
 }
 

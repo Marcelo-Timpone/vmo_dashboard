@@ -7,13 +7,19 @@ import {
   VmoReferencePeriod,
   AppTheme,
   ClientInfo,
-  ContainerParamSettings
+  ContainerParamSettings,
+  PageLayoutConfig,
+  ContainerLayoutConfig,
+  MonthlyKpiSnapshot
 } from './types';
 import {
   INITIAL_PROJECTS,
   INITIAL_WIDGETS,
   INITIAL_SHAREPOINT_LINKS,
-  INITIAL_CLIENTS
+  INITIAL_CLIENTS,
+  INITIAL_PAGE_LAYOUT,
+  INITIAL_CONTAINER_LAYOUT,
+  INITIAL_MONTHLY_HISTORY
 } from './data/initialData';
 import { DEFAULT_CONTAINER_SETTINGS } from './components/ContainersConfigSection';
 import { calculateVmoReferencePeriod } from './utils/dateUtils';
@@ -33,13 +39,7 @@ export default function App() {
     } catch {
       // ignore
     }
-    return {
-      username: 'demonstrativo@exedconsulting.com',
-      role: 'demonstrativo',
-      token: 'vmo_jwt_demonstrativo_session',
-      loginTime: '09:00',
-      expiresInMinutes: 60
-    };
+    return null;
   });
 
   const [currentTab, setCurrentTab] = useState<'dashboard' | 'configuracao'>('dashboard');
@@ -47,10 +47,12 @@ export default function App() {
   // Core App Data State (persisted in localStorage)
   const [clients, setClients] = useState<ClientInfo[]>(() => {
     try {
+      const isCleared = localStorage.getItem('vmo_exed_clients_cleared');
+      if (isCleared === 'true') return [];
       const saved = localStorage.getItem('vmo_exed_clients_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 15) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {
       // ignore
@@ -102,6 +104,45 @@ export default function App() {
       // ignore
     }
     return DEFAULT_CONTAINER_SETTINGS;
+  });
+
+  const [pageLayout, setPageLayout] = useState<PageLayoutConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem('vmo_exed_page_layout');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return INITIAL_PAGE_LAYOUT;
+  });
+
+  const [containerLayout, setContainerLayout] = useState<ContainerLayoutConfig[]>(() => {
+    try {
+      const saved = localStorage.getItem('vmo_exed_container_layout');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return INITIAL_CONTAINER_LAYOUT;
+  });
+
+  const [monthlyHistory, setMonthlyHistory] = useState<MonthlyKpiSnapshot[]>(() => {
+    try {
+      const saved = localStorage.getItem('vmo_exed_monthly_history');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return INITIAL_MONTHLY_HISTORY;
   });
 
   const [sharePointLinks, setSharePointLinks] = useState<SharePointFolderLink[]>(() => {
@@ -200,6 +241,30 @@ export default function App() {
 
   useEffect(() => {
     try {
+      localStorage.setItem('vmo_exed_page_layout', JSON.stringify(pageLayout));
+    } catch {
+      // ignore
+    }
+  }, [pageLayout]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('vmo_exed_container_layout', JSON.stringify(containerLayout));
+    } catch {
+      // ignore
+    }
+  }, [containerLayout]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('vmo_exed_monthly_history', JSON.stringify(monthlyHistory));
+    } catch {
+      // ignore
+    }
+  }, [monthlyHistory]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem('vmo_exed_sharepoint_links', JSON.stringify(sharePointLinks));
     } catch {
       // ignore
@@ -242,7 +307,17 @@ export default function App() {
             }
           }
           if (Array.isArray(d.clientes || d.clients)) {
-            setClients(d.clientes || d.clients);
+            const serverClients = d.clientes || d.clients;
+            const isClientsCleared = localStorage.getItem('vmo_exed_clients_cleared');
+            if (
+              isClientsCleared === 'true' &&
+              serverClients.length > 0 &&
+              serverClients.every((c: any) => c.status === 'DEMONSTRATIVO' || !c.status)
+            ) {
+              // Mantém zerado conforme escolha do usuário
+            } else {
+              setClients(serverClients);
+            }
           }
           if (Array.isArray(d.links_sharepoint || d.sharePointLinks)) {
             const sLinks = d.links_sharepoint || d.sharePointLinks;
@@ -257,6 +332,15 @@ export default function App() {
           const containers = d.configuracao_conteineres || d.containerSettings;
           if (containers && typeof containers === 'object') {
             setContainerSettings(containers);
+          }
+          if (Array.isArray(d.pageLayout) && d.pageLayout.length > 0) {
+            setPageLayout(d.pageLayout);
+          }
+          if (Array.isArray(d.containerLayout) && d.containerLayout.length > 0) {
+            setContainerLayout(d.containerLayout);
+          }
+          if (Array.isArray(d.monthlyHistory)) {
+            setMonthlyHistory(d.monthlyHistory);
           }
           const period = d.periodo_referencia || d.referencePeriod;
           if (period && typeof period === 'object') {
@@ -278,11 +362,14 @@ export default function App() {
         sharePointLinks,
         referencePeriod,
         localDosDados,
-        theme
+        theme,
+        pageLayout,
+        containerLayout,
+        monthlyHistory
       }).catch(() => {});
     }, 800);
     return () => clearTimeout(timeout);
-  }, [projects, clients, widgets, containerSettings, sharePointLinks, referencePeriod, localDosDados, theme]);
+  }, [projects, clients, widgets, containerSettings, sharePointLinks, referencePeriod, localDosDados, theme, pageLayout, containerLayout, monthlyHistory]);
 
   useEffect(() => {
     try {
@@ -311,19 +398,6 @@ export default function App() {
   const handleLogout = () => {
     setSession(null);
     setCurrentTab('dashboard');
-  };
-
-  const handleSwitchRole = () => {
-    if (!session) return;
-    const newRole = session.role === 'pmo' ? 'demonstrativo' : 'pmo';
-    setSession({
-      ...session,
-      role: newRole,
-      username: newRole === 'pmo' ? 'PMO@exedconsulting.com' : 'demonstrativo@exedconsulting.com'
-    });
-    if (newRole !== 'pmo') {
-      setCurrentTab('dashboard');
-    }
   };
 
   const handleRestoreDefaults = () => {
@@ -360,7 +434,6 @@ export default function App() {
         session={session}
         referencePeriod={referencePeriod}
         onLogout={handleLogout}
-        onSwitchRole={handleSwitchRole}
         theme={theme}
         onThemeChange={setTheme}
       />
@@ -378,6 +451,9 @@ export default function App() {
             isPmo={isPmo}
             theme={theme}
             containerSettings={containerSettings}
+            pageLayout={pageLayout}
+            containerLayout={containerLayout}
+            monthlyHistory={monthlyHistory}
           />
         )}
 
@@ -401,6 +477,13 @@ export default function App() {
             onThemeChange={setTheme}
             localDosDados={localDosDados}
             onUpdateLocalDosDados={setLocalDosDados}
+            session={session}
+            pageLayout={pageLayout}
+            containerLayout={containerLayout}
+            onUpdatePageLayout={setPageLayout}
+            onUpdateContainerLayout={setContainerLayout}
+            monthlyHistory={monthlyHistory}
+            onUpdateMonthlyHistory={setMonthlyHistory}
           />
         )}
 

@@ -63,12 +63,56 @@ CREATE TABLE IF NOT EXISTS public.projetos_sap (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Habilitar Row Level Security (RLS)
+-- 6. Tabela de Estado Completo do WebApp para a API do Claude
+-- Guarda em uma única linha (id = 'singleton') todo o estado que a API
+-- /api/vmo/state lê e escreve: projetos, clientes, widgets, links, período de
+-- referência, tema e instruções. É acessada apenas pelo backend (Vercel
+-- Serverless Functions) usando a SERVICE ROLE KEY, nunca pelo navegador —
+-- por isso NÃO recebe políticas públicas de leitura/escrita como as tabelas
+-- acima.
+CREATE TABLE IF NOT EXISTS public.vmo_app_state (
+    id TEXT PRIMARY KEY,
+    state_json JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Tabela de Autenticação Real de Usuários (login + gestão pelo PMO)
+-- Guarda usuário, hash de senha (bcrypt) e papel (pmo/demonstrativo).
+-- Acessada apenas pelo backend via Service Role Key — nunca pelo navegador —
+-- por isso NÃO recebe políticas públicas, igual à vmo_app_state.
+-- IMPORTANTE: não confundir com a tabela `usuarios` acima, que é só um
+-- diretório usado pela sincronização do front-end e não guarda senha.
+CREATE TABLE IF NOT EXISTS public.vmo_auth_users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('pmo', 'demonstrativo')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE public.vmo_auth_users ENABLE ROW LEVEL SECURITY;
+-- Nenhuma política pública de propósito — só a Service Role Key acessa.
+
+-- Habilitar Row Level Security (RLS) nas demais tabelas
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.configuracao_graficos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.data_referencia ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.projetos_sap ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vmo_app_state ENABLE ROW LEVEL SECURITY;
+-- Nenhuma política pública é criada para vmo_app_state de propósito: só a
+-- Service Role Key (usada no servidor) pode acessá-la, pois ela ignora RLS.
+
+-- Contas iniciais (TROQUE AS SENHAS ASSIM QUE FIZER O PRIMEIRO LOGIN):
+--   usuário: pmo@exedconsulting.com           | senha: ExedVmo@2026!
+--   usuário: demonstrativo@exedconsulting.com | senha: Demonstrativo@2026
+INSERT INTO public.vmo_auth_users (id, username, password_hash, name, role)
+VALUES
+  ('usr-pmo-default', 'pmo@exedconsulting.com', '$2b$10$TbHpb7zUF8f0hRYK9NC49OyrxCMDoMHIqD/.dx3vGURTh1xkQYZpW', 'Gestor VMO / PMO Corporativo', 'pmo'),
+  ('usr-demo-default', 'demonstrativo@exedconsulting.com', '$2b$10$dgL1uN1WTk01WrAZ1ENxBepf1stvXDETpbmMYXH3aS/oN9EZCOGdy', 'Visualizador Executivo', 'demonstrativo')
+ON CONFLICT (id) DO NOTHING;
 
 -- Políticas de acesso (Permitir leitura pública e escrita autenticada/anônima com anonKey)
 CREATE POLICY "Permitir leitura usuarios" ON public.usuarios FOR SELECT USING (true);

@@ -1,21 +1,26 @@
 import React, { useMemo } from 'react';
-import { SapProjectFinancial, AppTheme, ContainerParamSettings } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
+import { ContainerSlot } from './ContainerSlot';
 
 interface AttentionPointsDashboardProps {
   projects: SapProjectFinancial[];
   selectedFilters: FilterSolutionType[];
   theme?: AppTheme;
   containerSettings?: ContainerParamSettings;
+  containerLayout?: ContainerLayoutConfig[];
+  isPmo?: boolean;
 }
 
 export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> = ({
   projects,
   selectedFilters,
   theme = 'neon',
-  containerSettings
+  containerSettings,
+  containerLayout,
+  isPmo = false
 }) => {
   const isLight = theme === 'light';
   const marginTarget = containerSettings?.contractMarginTarget ?? 24.0;
@@ -28,7 +33,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
     }
     return projects.filter(p => {
       return selectedFilters.some(filter => {
-        if (filter === 'SCP') return p.solution.includes('SCP');
+        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
         return p.solution === filter;
       });
     });
@@ -113,6 +118,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
       {/* ========================================================================= */}
       {/* 1. PROJETOS DETRATORES                                                    */}
       {/* ========================================================================= */}
+      <ContainerSlot id="pontos_atencao__detratores" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
         isLight
           ? 'bg-white border-slate-200 shadow-sm'
@@ -252,11 +258,13 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
           </div>
         </div>
       </div>
+      </ContainerSlot>
 
       {/* ========================================================================= */}
       {/* 2. ADERÊNCIA AOS CRONOGRAMAS E ATRASOS                                    */}
       {/* 25% Quadrado com gráfico de arco preenchido + 75% Tabela                  */}
       {/* ========================================================================= */}
+      <ContainerSlot id="pontos_atencao__cronogramas" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
         isLight
           ? 'bg-white border-slate-200 shadow-sm'
@@ -439,10 +447,12 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
           </div>
         </div>
       </div>
+      </ContainerSlot>
 
       {/* ========================================================================= */}
       {/* 3. DOCUMENTAÇÃO REGISTRADA AO PMO E ASSINADA                              */}
       {/* ========================================================================= */}
+      <ContainerSlot id="pontos_atencao__documentacao" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
         isLight
           ? 'bg-white border-slate-200 shadow-sm'
@@ -535,6 +545,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
           })}
         </div>
       </div>
+      </ContainerSlot>
     </div>
   );
 };

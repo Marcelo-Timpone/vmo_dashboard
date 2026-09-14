@@ -240,11 +240,21 @@ CREATE TABLE IF NOT EXISTS public.data_referencia (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 5. Tabela de Estado Completo do WebApp para a API do Claude (usada por /api/vmo/state)
+-- Acessada apenas pelo backend com a Service Role Key — por isso não recebe
+-- políticas públicas como as tabelas acima.
+CREATE TABLE IF NOT EXISTS public.vmo_app_state (
+    id TEXT PRIMARY KEY,
+    state_json JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Habilitar Row Level Security (RLS) com políticas de leitura pública/autenticada
 ALTER TABLE public.usuarios ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.configuracao_graficos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.links ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.data_referencia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.vmo_app_state ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Permitir leitura para todos" ON public.usuarios FOR SELECT USING (true);
 CREATE POLICY "Permitir escrita para PMO" ON public.usuarios FOR ALL USING (true);

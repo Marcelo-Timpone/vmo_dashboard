@@ -64,8 +64,8 @@ export function exportToCsv(projects: SapProjectFinancial[], filename: string = 
   const headers = ['Código', 'Nome', 'Cliente', 'Status', 'Data Encerramento', 'Solução SAP', 'Orçado (R$)', 'Realizado (R$)', 'Faturado (R$)', 'Gasto Reembolsável (R$)', 'CR em Aberto', 'Valor CR (R$)', 'Desvio (%)', 'Margem (%)', 'Tráfego', 'Data Ref', 'SharePoint'];
   const rows = projects.map(p => [
     `"${p.code}"`,
-    `"${p.name.replace(/"/g, '""')}"`,
-    `"${p.client.replace(/"/g, '""')}"`,
+    `"${p.name?.replace(/"/g, '""') || ''}"`,
+    `"${p.client?.replace(/"/g, '""') || ''}"`,
     `"${p.status || 'ATIVO'}"`,
     `"${p.closureDate || ''}"`,
     `"${p.solution}"`,
@@ -262,6 +262,7 @@ export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string
   .traffic-verde { color: #166534; font-weight: bold; }
   .traffic-amarelo { color: #854D0E; font-weight: bold; }
   .traffic-vermelho { color: #991B1B; font-weight: bold; }
+  .traffic-cinza { color: #4B5563; font-weight: bold; }
   .footer { margin-top: 30px; font-size: 11px; color: #64748B; border-top: 1px solid #E2E8F0; padding-top: 10px; }
 </style>
 </head>
@@ -374,7 +375,7 @@ export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string
             <td>${formatCurrencyBRL(p.budgetRealized)}</td>
             <td>${p.costVariancePercent >= 0 ? '+' : ''}${p.costVariancePercent}%</td>
             <td>${p.marginPercent}%</td>
-            <td class="traffic-${p.trafficTag.toLowerCase()}">${p.trafficTag.toUpperCase()}</td>
+            <td class="traffic-${p.trafficTag?.toLowerCase() || 'cinza'}">${p.trafficTag?.toUpperCase() || 'N/D'}</td>
           </tr>
         `).join('')}
       </tbody>

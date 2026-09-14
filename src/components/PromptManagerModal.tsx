@@ -19,8 +19,8 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredPrompts = prompts.filter(p =>
-    p.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.content.toLowerCase().includes(searchTerm.toLowerCase())
+    p.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    p.content?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const selectedPrompt = prompts.find(p => p.id === selectedPromptId) || prompts[0];
@@ -54,7 +54,7 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
       text += `[PROMPT #${index + 1}] - ${p.title}\n`;
       text += `ID: ${p.id} | Registrado em: ${p.timestamp}\n`;
       text += `--------------------------------------------------------------------------------\n\n`;
-      text += `${p.content.trim()}\n\n\n`;
+      text += `${(p.content || '').trim()}\n\n\n`;
     });
 
     text += `================================================================================\n`;
@@ -97,7 +97,7 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
     let text = `HISTÓRICO COMPLETO DE PROMPTS - VMO EXED CONSULTING (${prompts.length} prompts)\n\n`;
     prompts.forEach((p, index) => {
       text += `=== [PROMPT #${index + 1}] ${p.title} (${p.timestamp}) ===\n`;
-      text += `${p.content.trim()}\n\n`;
+      text += `${(p.content || '').trim()}\n\n`;
     });
     handleCopy(text, `Todos os ${prompts.length} prompts foram copiados para a área de transferência!`);
   };

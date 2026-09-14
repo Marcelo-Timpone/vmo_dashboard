@@ -34,8 +34,8 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
 
   // Filter clients
   const filteredClients = clients.filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.shortName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.shortName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.defaultSolution && c.defaultSolution.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
@@ -69,7 +69,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
         const clientObj = clients.find(c => c.id === targetId);
         if (clientObj) {
           const updatedProjects = projects.map(p => {
-            if (p.client === clientObj.name || p.client.includes(clientObj.shortName)) {
+            if (p.client === clientObj.name || (p.client && clientObj.shortName && p.client.includes(clientObj.shortName))) {
               return { ...p, clientLogo: dataUrl };
             }
             return p;
@@ -147,9 +147,9 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
     const updatedProjects = projects.map(p => {
       const matches =
         p.client === prevName ||
-        (prevShort && p.client.includes(prevShort)) ||
+        (prevShort && p.client && p.client.includes(prevShort)) ||
         p.client === editingClient.name ||
-        p.client.includes(editingClient.shortName);
+        (p.client && editingClient.shortName && p.client.includes(editingClient.shortName));
 
       if (matches) {
         return {
@@ -167,10 +167,11 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
   };
 
   const handleDeleteClient = (clientId: string, clientName: string) => {
-    if (confirm(`Deseja excluir o cliente "${clientName}" e desvincular o logotipo?`)) {
-      onUpdateClients(clients.filter(c => c.id !== clientId));
-      if (onShowMessage) onShowMessage(`Cliente "${clientName}" excluído.`);
-    }
+    // Execução direta sem window.confirm (não funciona de forma confiável no
+    // ambiente de iframe deste webapp — mesmo motivo documentado nos botões
+    // de dados demonstrativos). Mantém consistência com handleDeleteProject.
+    onUpdateClients(clients.filter(c => c.id !== clientId));
+    if (onShowMessage) onShowMessage(`Cliente "${clientName}" excluído.`);
   };
 
   return (
@@ -442,7 +443,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
           <tbody>
             {filteredClients.map(client => {
               const activeProjectsCount = projects.filter(
-                p => p.client === client.name || p.client.includes(client.shortName)
+                p => p.client === client.name || (p.client && client.shortName && p.client.includes(client.shortName))
               ).length;
 
               return (

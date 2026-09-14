@@ -1,21 +1,28 @@
 import React, { useState, useMemo } from 'react';
-import { SapProjectFinancial, AppTheme, ContainerParamSettings } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
+import { ContainerSlot } from './ContainerSlot';
 
 interface OnePageDashboardProps {
   projects: SapProjectFinancial[];
   selectedFilters: FilterSolutionType[];
   theme?: AppTheme;
   containerSettings?: ContainerParamSettings;
+  containerLayout?: ContainerLayoutConfig[];
+  isPmo?: boolean;
+  monthlyHistory?: MonthlyKpiSnapshot[];
 }
 
 export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
   projects,
   selectedFilters,
   theme = 'neon',
-  containerSettings
+  containerSettings,
+  containerLayout,
+  isPmo = false,
+  monthlyHistory = []
 }) => {
   const isLight = theme === 'light';
   const [hoveredBurnupMonth, setHoveredBurnupMonth] = useState<number | null>(null);
@@ -27,7 +34,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     }
     return projects.filter(p => {
       return selectedFilters.some(filter => {
-        if (filter === 'SCP') return p.solution.includes('SCP');
+        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
         return p.solution === filter;
       });
     });
@@ -85,40 +92,84 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
   const annualTargetM = (containerSettings?.annualRevenueTarget ?? 120000000) / 1000000;
   const monthlyTargetStep = annualTargetM / 12;
   const monthsBase = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-  const actualRatios = [1.02, 1.04, 1.05, 1.05, 1.056, 1.058, 1.07, 1.067, 1.069];
+
+  const today = useMemo(() => new Date(), []);
+  const currentYear = today.getFullYear();
+  const currentMonthIdx = today.getMonth(); // 0-11
+
+  // Mapa mês (0-11) -> dado real daquele mês no ano atual, vindo da migração/histórico
+  const historyByMonth = useMemo(() => {
+    const map = new Map<number, MonthlyKpiSnapshot>();
+    monthlyHistory
+      .filter(h => h.year === currentYear)
+      .forEach(h => map.set(h.month - 1, h));
+    return map;
+  }, [monthlyHistory, currentYear]);
 
   const burnupMonths = useMemo(() => {
+    let cumulative = 0;
+    let brokeChain = false;
     return monthsBase.map((m, idx) => {
       const targetAcc = Number((monthlyTargetStep * (idx + 1)).toFixed(1));
-      const isPastOrCurrent = idx <= 8; // Jan to Set
-      const actualAcc = isPastOrCurrent ? Number((targetAcc * actualRatios[idx]).toFixed(1)) : null;
+      const entry = historyByMonth.get(idx);
+      let actualAcc: number | null = null;
+
+      if (!brokeChain && entry) {
+        cumulative += entry.revenueBilled / 1_000_000;
+        actualAcc = Number(cumulative.toFixed(1));
+      } else if (!entry) {
+        // A partir do primeiro mês sem dado migrado, paramos o acumulado
+        // (evita mostrar uma linha "real" com um buraco no meio).
+        brokeChain = true;
+      }
+
       return {
         month: m,
         targetAcc,
         actualAcc,
+        hasData: !!entry,
         targetLabel: `R$ ${targetAcc.toFixed(1).replace('.', ',')}M`,
-        actualLabel: actualAcc !== null ? `R$ ${actualAcc.toFixed(1).replace('.', ',')}M` : 'Projetado',
-        current: idx === 8
+        actualLabel: actualAcc !== null ? `R$ ${actualAcc.toFixed(1).replace('.', ',')}M` : 'Sem dado migrado',
+        current: idx === currentMonthIdx
       };
     });
-  }, [monthlyTargetStep]);
+  }, [monthlyTargetStep, historyByMonth]);
 
-  // 12 Months Margin Data (Contractual Baseline: containerSettings.contractMarginTarget or 24.0%)
+  // Escala Y do gráfico de burnup: 0 -> y=120 (piso), annualTargetM -> y=20 (topo)
+  const burnupYFromValueM = (valueM: number) => Math.max(8, Math.min(128, 120 - (valueM / annualTargetM) * 100));
+  const burnupPointsWithData = burnupMonths
+    .map((m, idx) => ({ ...m, idx }))
+    .filter(m => m.actualAcc !== null);
+  const burnupPathD = burnupPointsWithData
+    .map((m, i) => `${i === 0 ? 'M' : 'L'} ${50 + m.idx * 90} ${burnupYFromValueM(m.actualAcc as number)}`)
+    .join(' ');
+
+  // 12 Months Margin Data — usa dado real migrado quando existe; mês atual usa a
+  // média calculada dos projetos ativos agora; meses futuros mostram a meta
+  // (visualmente esmaecidos); meses passados sem migração ficam "sem dado".
   const MARGIN_TARGET = containerSettings?.contractMarginTarget ?? 24.0;
-  const marginMonths = [
-    { month: 'Jan', value: 21.4, isCurrent: false },
-    { month: 'Fev', value: 22.1, isCurrent: false },
-    { month: 'Mar', value: 25.1, isCurrent: false },
-    { month: 'Abr', value: 24.5, isCurrent: false },
-    { month: 'Mai', value: 25.8, isCurrent: false },
-    { month: 'Jun', value: 25.3, isCurrent: false },
-    { month: 'Jul', value: 26.2, isCurrent: false },
-    { month: 'Ago', value: 25.4, isCurrent: false },
-    { month: 'Set', value: parseFloat(currentAvgMargin), isCurrent: true },
-    { month: 'Out', value: MARGIN_TARGET, isFuture: true },
-    { month: 'Nov', value: MARGIN_TARGET, isFuture: true },
-    { month: 'Dez', value: MARGIN_TARGET, isFuture: true }
-  ];
+  const marginMonths = useMemo(() => {
+    return monthsBase.map((m, idx) => {
+      const isCurrent = idx === currentMonthIdx;
+      const isFuture = idx > currentMonthIdx;
+      const entry = historyByMonth.get(idx);
+
+      let value: number | null = null;
+      let hasData = false;
+      if (isCurrent) {
+        value = parseFloat(currentAvgMargin);
+        hasData = true;
+      } else if (entry) {
+        value = entry.marginAvg;
+        hasData = true;
+      } else if (isFuture) {
+        value = MARGIN_TARGET;
+        hasData = false;
+      }
+
+      return { month: m, value, isCurrent, isFuture, hasData };
+    });
+  }, [historyByMonth, currentAvgMargin, currentMonthIdx, MARGIN_TARGET]);
 
   // Client monogram helper
   const getClientInitials = (name: string) => {
@@ -145,6 +196,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
       {/* ========================================================================= */}
       {/* 1. PRINCIPAIS INFORMAÇÕES - 4 CAIXAS NA HORIZONTAL                        */}
       {/* ========================================================================= */}
+      <ContainerSlot id="one_page__principais_informacoes" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
         isLight
           ? 'bg-white border-slate-200 shadow-sm'
@@ -347,10 +399,12 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           </div>
         </div>
       </div>
+      </ContainerSlot>
 
       {/* ========================================================================= */}
       {/* 2. META DE RECEITA - BURNUP CHART (ESTÁTICO, SEM ANIMAÇÃO CONFORME PEDIDO) */}
       {/* ========================================================================= */}
+      <ContainerSlot id="one_page__meta_receita" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
         isLight
           ? 'bg-white border-slate-200 shadow-sm'
@@ -423,30 +477,29 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               strokeDasharray="5 4"
             />
 
-            {/* Actual Realized Revenue Path (Direct static stroke, no dashoffset animation) */}
-            <path
-              d="M 50 120 L 140 110 L 230 98 L 320 86 L 410 74 L 500 62 L 590 48 L 680 35 L 770 22"
-              fill="none"
-              stroke={isLight ? '#059669' : '#00FF88'}
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+            {/* Actual Realized Revenue Path (calculado a partir do histórico real migrado) */}
+            {burnupPathD && (
+              <path
+                d={burnupPathD}
+                fill="none"
+                stroke={isLight ? '#059669' : '#00FF88'}
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
 
-            {/* Month Data Points on Real Line (Static, no ping animation) */}
-            {burnupMonths
-              .filter(m => m.actualAcc !== null)
-              .map((m, idx) => {
-                const x = 50 + idx * 90;
-                const pointsY = [120, 110, 98, 86, 74, 62, 48, 35, 22];
-                const y = pointsY[idx];
+            {/* Month Data Points on Real Line (posição calculada a partir do dado real) */}
+            {burnupPointsWithData.map(m => {
+                const x = 50 + m.idx * 90;
+                const y = burnupYFromValueM(m.actualAcc as number);
                 const isCurrent = !!m.current;
 
                 return (
                   <g
                     key={m.month}
                     className="cursor-pointer"
-                    onMouseEnter={() => setHoveredBurnupMonth(idx)}
+                    onMouseEnter={() => setHoveredBurnupMonth(m.idx)}
                     onMouseLeave={() => setHoveredBurnupMonth(null)}
                   >
                     <circle
@@ -499,7 +552,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               }}
             >
               <div className="font-bold text-[10px] mb-0.5">
-                {burnupMonths[hoveredBurnupMonth].month}/2026 {burnupMonths[hoveredBurnupMonth].current ? '(Mês Atual)' : ''}
+                {burnupMonths[hoveredBurnupMonth].month}/{currentYear} {burnupMonths[hoveredBurnupMonth].current ? '(Mês Atual)' : ''}
               </div>
               <div className={`font-bold text-[10px] ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
                 Real: {burnupMonths[hoveredBurnupMonth].actualLabel}
@@ -511,10 +564,12 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           )}
         </div>
       </div>
+      </ContainerSlot>
 
       {/* ========================================================================= */}
       {/* 3. META DE MARGEM - 25% QUADRADO META ATUAL + 75% GRÁFICO DE COLUNAS       */}
       {/* ========================================================================= */}
+      <ContainerSlot id="one_page__meta_margem" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
         isLight
           ? 'bg-white border-slate-200 shadow-sm'
@@ -548,7 +603,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               <div className={`text-[9px] font-bold uppercase tracking-wider mb-0.5 ${
                 isLight ? 'text-slate-600' : 'text-slate-400'
               }`}>
-                Mês Atual (Setembro)
+                Mês Atual ({monthsBase[currentMonthIdx]})
               </div>
               <div className="flex items-baseline gap-2">
                 <span className={`text-xl font-black ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
@@ -588,10 +643,47 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                   const colWidth = 28;
                   const colSpacing = 77;
                   const x = 50 + idx * colSpacing;
-                  const barHeight = (m.value / MARGIN_MAX) * MARGIN_SPAN_Y;
-                  const barY = MARGIN_FLOOR_Y - barHeight;
                   const isCurrent = !!m.isCurrent;
                   const isFuture = !!m.isFuture;
+
+                  if (m.value === null) {
+                    // Mês passado sem dado migrado ainda: sem barra, só um indicador discreto
+                    return (
+                      <g key={m.month}>
+                        <line
+                          x1={x}
+                          y1={MARGIN_FLOOR_Y}
+                          x2={x + colWidth}
+                          y2={MARGIN_FLOOR_Y}
+                          stroke={isLight ? '#CBD5E1' : '#334155'}
+                          strokeWidth="2"
+                          strokeDasharray="3 2"
+                        />
+                        <text
+                          x={x + colWidth / 2}
+                          y={MARGIN_FLOOR_Y - 6}
+                          textAnchor="middle"
+                          fill={isLight ? '#94A3B8' : '#475569'}
+                          fontSize="7.5"
+                          fontStyle="italic"
+                        >
+                          s/ dado
+                        </text>
+                        <text
+                          x={x + colWidth / 2}
+                          y="128"
+                          textAnchor="middle"
+                          fill={isLight ? '#94A3B8' : '#475569'}
+                          fontSize="10"
+                        >
+                          {m.month}
+                        </text>
+                      </g>
+                    );
+                  }
+
+                  const barHeight = (m.value / MARGIN_MAX) * MARGIN_SPAN_Y;
+                  const barY = MARGIN_FLOOR_Y - barHeight;
                   const exceedsTarget = m.value >= MARGIN_TARGET;
                   const isBelowAverage = !exceedsTarget;
 
@@ -688,10 +780,12 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           </div>
         </div>
       </div>
+      </ContainerSlot>
 
       {/* ========================================================================= */}
       {/* 4. CONTRIBUIÇÕES PARA AS METAS - TABELAS DIVIDIDAS NO PONTO VERTICAL       */}
       {/* ========================================================================= */}
+      <ContainerSlot id="one_page__contribuicoes_metas" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
         isLight
           ? 'bg-white border-slate-200 shadow-sm'
@@ -809,6 +903,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           </div>
         </div>
       </div>
+      </ContainerSlot>
     </div>
   );
 };

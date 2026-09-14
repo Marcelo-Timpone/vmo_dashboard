@@ -3,6 +3,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/vmo/openapi.json", "destination": "/api/vmo/openapi" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

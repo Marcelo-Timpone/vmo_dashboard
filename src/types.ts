@@ -8,12 +8,31 @@ export type TrafficTag = 'Verde' | 'Amarelo' | 'Vermelho';
 
 export type ProjectStatus = 'ATIVO' | 'ENCERRADO' | 'DEMONSTRATIVO';
 
+export interface MonthlyKpiSnapshot {
+  monthKey: string; // 'YYYY-MM', ex: '2026-03' — usado como identificador único
+  year: number;
+  month: number; // 1 a 12
+  revenueBilled: number; // faturamento total do mês (R$), NÃO acumulado
+  marginAvg: number; // margem média do mês (%)
+}
+
 export interface UserSession {
   username: string;
   role: UserRole;
   token: string;
   loginTime: string;
   expiresInMinutes: number;
+  userId?: string;
+  name?: string;
+}
+
+export interface AuthUserRecord {
+  id: string;
+  username: string;
+  name: string;
+  role: UserRole;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface ClientInfo {
@@ -96,6 +115,27 @@ export interface DashboardWidgetConfig {
   filterTraffic?: TrafficTag[];
 }
 
+export type DashboardPageKey = 'one_page' | 'pontos_atencao' | 'informacoes_gerais' | 'detalhamento_financeiro';
+
+export interface PageLayoutConfig {
+  key: DashboardPageKey;
+  label: string;
+  order: number;
+  // Quando true, apenas usuários com perfil PMO conseguem ver esta página
+  // (inclusive na navegação do dashboard). Demais usuários não a veem.
+  hidden: boolean;
+}
+
+export interface ContainerLayoutConfig {
+  id: string;
+  pageKey: DashboardPageKey;
+  label: string;
+  order: number;
+  // Quando true, apenas usuários com perfil PMO conseguem ver este contêiner
+  // (inclusive no dashboard). Demais usuários não o veem.
+  hidden: boolean;
+}
+
 export interface SharePointFolderLink {
   id: string;
   label: string;
@@ -140,6 +180,9 @@ export interface AppStateData {
   instrucoesPreenchimento?: string;
   localDosDados?: string;
   local_dos_dados?: string;
+  pageLayout?: PageLayoutConfig[];
+  containerLayout?: ContainerLayoutConfig[];
+  monthlyHistory?: MonthlyKpiSnapshot[];
   lastSaved: string;
   supabaseSyncedAt?: string;
 }
