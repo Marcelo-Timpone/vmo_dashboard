@@ -64,7 +64,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         className="w-full max-w-md my-auto bg-[#091B2E] border border-slate-800 shadow-[0_10px_40px_rgba(0,0,0,0.6)]"
       >
         {/* Card Header */}
-        <div className="bg-[#071726] px-6 py-6 text-center border-b-2 border-[#F26522] shadow-[0_2px_15px_rgba(242,101,34,0.15)]">
+        <div className="bg-[#071726] px-6 py-6 text-center border-b-2 border-exed-accent shadow-[0_2px_15px_var(--exed-accent-glow-soft)]">
           <div className="flex justify-center mb-3">
             <ExedLogo variant="white" size="lg" />
           </div>
@@ -85,7 +85,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               autoComplete="username"
               value={username}
               onChange={e => setUsername(e.target.value)}
-              className="w-full px-3 py-2 bg-[#050F1A] border border-slate-700 text-slate-100 focus:outline-none focus:border-[#F26522] text-xs transition-colors shadow-inner"
+              className="w-full px-3 py-2 bg-[#050F1A] border border-slate-700 text-slate-100 focus:outline-none focus:border-exed-accent text-xs transition-colors shadow-inner"
               placeholder="seu.usuario@exedconsulting.com"
             />
           </div>
@@ -99,7 +99,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="text-xs text-[#F26522] hover:text-orange-400 font-semibold cursor-pointer underline bg-transparent border-none transition-colors"
+                className="text-xs text-exed-accent hover:text-exed-accent-strong font-semibold cursor-pointer underline bg-transparent border-none transition-colors"
               >
                 {showPassword ? 'Ocultar senha' : 'Ver senha'}
               </button>
@@ -109,7 +109,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
               autoComplete="current-password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full px-3 py-2 bg-[#050F1A] border border-slate-700 text-slate-100 focus:outline-none focus:border-[#F26522] text-xs transition-colors shadow-inner"
+              className="w-full px-3 py-2 bg-[#050F1A] border border-slate-700 text-slate-100 focus:outline-none focus:border-exed-accent text-xs transition-colors shadow-inner"
               placeholder=""
             />
           </div>
@@ -125,7 +125,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full py-3 bg-[#F26522] hover:bg-orange-600 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold tracking-wider uppercase text-xs cursor-pointer border-none transition-all shadow-[0_0_15px_rgba(242,101,34,0.3)] text-center"
+              className="w-full py-3 bg-exed-accent hover:bg-exed-accent-strong disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold tracking-wider uppercase text-xs cursor-pointer border-none transition-all shadow-[0_0_15px_var(--exed-accent-glow)] text-center"
             >
               {isSubmitting ? 'Entrando...' : 'Entrar'}
             </button>

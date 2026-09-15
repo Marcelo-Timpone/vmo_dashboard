@@ -1,9 +1,18 @@
 import React, { useMemo } from 'react';
-import { SapProjectFinancial, AppTheme, ContainerLayoutConfig } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerLayoutConfig, ContainerParamSettings, MonthlyKpiSnapshot } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
 import { ContainerSlot } from './ContainerSlot';
+import { MoMBadge, MoMEmpty } from './MoMBadge';
+import {
+  computeDelta,
+  computeProjectVariance,
+  formatDeltaPercent,
+  formatDeltaPp,
+  latestHistoryMonth,
+  hasProjectSnapshots
+} from '../utils/monthlyComparison';
 
 interface DetailedFinancialDashboardProps {
   projects: SapProjectFinancial[];
@@ -11,6 +20,8 @@ interface DetailedFinancialDashboardProps {
   theme?: AppTheme;
   containerLayout?: ContainerLayoutConfig[];
   isPmo?: boolean;
+  containerSettings?: ContainerParamSettings;
+  monthlyHistory?: MonthlyKpiSnapshot[];
 }
 
 export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProps> = ({
@@ -18,8 +29,11 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
   selectedFilters,
   theme = 'neon',
   containerLayout,
-  isPmo = false
+  isPmo = false,
+  containerSettings,
+  monthlyHistory = []
 }) => {
+  // CÓDIGO MORTO (T9): o app é fixo em tema Neon, então isLight é sempre false.
   const isLight = theme === 'light';
 
   // Filter projects by selected SAP solutions
@@ -48,8 +62,10 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
   // Aggregated totals
   const totalPlannedRevenue = useMemo(() => {
     return filteredProjects.reduce((acc, p) => {
-      const plannedRev = Math.round((p.budgetPlanned || 0) / (1 - (p.marginPercent || 24) / 100));
-      return acc + plannedRev;
+      // Sem margem no projeto, não dá para derivar o faturamento planejado —
+      // o "|| 24" que existia aqui era uma margem chutada.
+      if (!p.budgetPlanned || !p.marginPercent) return acc;
+      return acc + Math.round(p.budgetPlanned / (1 - p.marginPercent / 100));
     }, 0);
   }, [filteredProjects]);
 
@@ -63,7 +79,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
 
   const totalRealBudget = useMemo(() => {
     return filteredProjects.reduce(
-      (acc, p) => acc + (p.budgetRealized || (p.totalResources ? p.totalResources * 80000 : 0)),
+      (acc, p) => acc + (p.budgetRealized || 0),
       0
     );
   }, [filteredProjects]);
@@ -76,6 +92,29 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
     );
     return (totalMarginBRL / totalBilledRevenue) * 100;
   }, [filteredProjects, totalBilledRevenue]);
+
+  // ---------------------------------------------------------------------------
+  // COMPARATIVOS MÊS A MÊS
+  // ---------------------------------------------------------------------------
+  const isPortfolioWide = selectedFilters.includes('TODOS') || selectedFilters.length === 0;
+  const refMonth = useMemo(() => latestHistoryMonth(monthlyHistory), [monthlyHistory]);
+  const perProjectAvailable = useMemo(() => hasProjectSnapshots(monthlyHistory), [monthlyHistory]);
+
+  const deltaFor = (metric: Parameters<typeof computeDelta>[1]) =>
+    isPortfolioWide && refMonth
+      ? computeDelta(monthlyHistory, metric, refMonth.year, refMonth.month)
+      : null;
+
+  const revenueDelta = deltaFor('revenueBilled');
+  const spendDelta = deltaFor('totalSpend');
+  const plannedBudgetDelta = deltaFor('plannedBudgetTotal');
+  const marginDelta = deltaFor('marginAvg');
+
+  const marginTarget = containerSettings?.contractMarginTarget;
+  const hasMarginTarget =
+    typeof marginTarget === 'number' && Number.isFinite(marginTarget) && marginTarget > 0;
+  // Sem meta configurada, a cor da margem usa a média ponderada do portfólio.
+  const marginBaseline = hasMarginTarget ? (marginTarget as number) : weightedAverageMargin;
 
   // Theme styling helpers
   const containerBg = isLight
@@ -100,7 +139,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
           isLight ? 'border-slate-200' : 'border-slate-800'
         }`}>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-[#F26522]">
+            <span className="text-xs font-bold uppercase tracking-wider text-exed-accent">
               Demonstrativo Consolidado de Projetos & Faturamento
             </span>
             <span className={`text-[10px] px-2 py-0.5 border font-semibold ${
@@ -130,16 +169,29 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
                 <th className="py-2.5 px-3 text-right">Uso de Orçamento Total Planejado</th>
                 <th className="py-2.5 px-3 text-right">Uso de Orçamento Total Real</th>
                 <th className="py-2.5 px-3 text-right">Margem de Contribuição</th>
+                {perProjectAvailable && (
+                  <th className="py-2.5 px-3 text-right">Δ Faturamento vs Mês Ant.</th>
+                )}
               </tr>
             </thead>
             <tbody className={`divide-y ${borderDivider}`}>
               {filteredProjects.map(p => {
-                const plannedRevenue = Math.round((p.budgetPlanned || 0) / (1 - (p.marginPercent || 24) / 100));
+                // Sem orçado ou sem margem, não há como derivar o faturamento
+                // planejado — a linha mostra "—" em vez de assumir margem 24%.
+                const plannedRevenue =
+                  p.budgetPlanned && p.marginPercent
+                    ? Math.round(p.budgetPlanned / (1 - p.marginPercent / 100))
+                    : null;
                 const plannedBudget = p.budgetPlanned || 0;
-                const realBudget = p.budgetRealized || (p.totalResources ? p.totalResources * 80000 : 0);
+                const realBudget = p.budgetRealized || 0;
                 const margin = p.marginPercent;
-                const isMarginOk = margin >= 24.0;
-                const isMarginWarning = margin >= 20.0 && margin < 24.0;
+                // Referência: a meta quando configurada, senão a média ponderada.
+                const isMarginOk = margin >= marginBaseline;
+                const isMarginWarning = !isMarginOk && margin >= marginBaseline - 4;
+
+                const billedVariance = refMonth
+                  ? computeProjectVariance(monthlyHistory, p.id, 'billed', refMonth.year, refMonth.month)
+                  : null;
 
                 const marginBadgeClass = isMarginOk
                   ? isLight
@@ -190,7 +242,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
 
                     {/* Coluna 4: Faturamento Planejado Total */}
                     <td className="py-2.5 px-3 text-right font-mono text-[11px] whitespace-nowrap text-slate-400">
-                      {formatCurrencyBRL(plannedRevenue)}
+                      {plannedRevenue !== null ? formatCurrencyBRL(plannedRevenue) : '—'}
                     </td>
 
                     {/* Coluna 5: Faturamento Real Total */}
@@ -214,6 +266,33 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
                         {margin.toFixed(1)}%
                       </span>
                     </td>
+
+                    {/* Coluna 9: variação de faturamento do projeto, calculada
+                        a partir do histórico por projeto. */}
+                    {perProjectAvailable && (
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                        {billedVariance ? (
+                          <span
+                            className={`font-mono font-bold text-[11px] px-2 py-0.5 border ${
+                              billedVariance.percent >= 0
+                                ? isLight
+                                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
+                                  : 'text-[#00FF88] bg-[#00FF88]/10 border-[#00FF88]/30'
+                                : isLight
+                                ? 'text-red-700 bg-red-50 border-red-200'
+                                : 'text-[#FF3366] bg-[#FF3366]/10 border-[#FF3366]/30'
+                            }`}
+                          >
+                            {billedVariance.percent > 0 ? '+' : ''}
+                            {billedVariance.percent.toFixed(1)}%
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-500" title="Sem snapshot deste projeto no mês anterior.">
+                            —
+                          </span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -228,7 +307,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
                 <td className="py-3 px-3 text-right font-mono">
                   {formatCurrencyBRL(totalPlannedRevenue)}
                 </td>
-                <td className="py-3 px-3 text-right font-mono text-[#F26522]">
+                <td className="py-3 px-3 text-right font-mono text-exed-accent">
                   {formatCurrencyBRL(totalBilledRevenue)}
                 </td>
                 <td className="py-3 px-3 text-right font-mono">
@@ -239,7 +318,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
                 </td>
                 <td className="py-3 px-3 text-right font-mono">
                   <span className={`px-2 py-0.5 border ${
-                    weightedAverageMargin >= 24.0
+                    weightedAverageMargin >= marginBaseline
                       ? isLight
                         ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
                         : 'text-[#00FF88] bg-[#00FF88]/10 border-[#00FF88]/30'
@@ -250,7 +329,44 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
                     {weightedAverageMargin.toFixed(1)}%
                   </span>
                 </td>
+                {perProjectAvailable && <td className="py-3 px-3" />}
               </tr>
+
+              {/* Linha de comparativo consolidado contra o mês anterior.
+                  Só aparece quando existe base para calcular. */}
+              {isPortfolioWide && (revenueDelta || spendDelta || plannedBudgetDelta || marginDelta) && (
+                <tr className={`${isLight ? 'bg-slate-50 text-slate-700' : 'bg-[#050F1A] text-slate-300'} text-xs`}>
+                  <td className="py-2 px-3 uppercase tracking-wider text-[10px] font-bold" colSpan={3}>
+                    Variação vs mês anterior
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {plannedBudgetDelta
+                      ? <MoMBadge delta={plannedBudgetDelta} text={formatDeltaPercent(plannedBudgetDelta)} theme={theme} suffix="" neutral />
+                      : <MoMEmpty theme={theme} />}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {revenueDelta
+                      ? <MoMBadge delta={revenueDelta} text={formatDeltaPercent(revenueDelta)} theme={theme} suffix="" />
+                      : <MoMEmpty theme={theme} />}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {plannedBudgetDelta
+                      ? <MoMBadge delta={plannedBudgetDelta} text={formatDeltaPercent(plannedBudgetDelta)} theme={theme} suffix="" neutral />
+                      : <MoMEmpty theme={theme} />}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {spendDelta
+                      ? <MoMBadge delta={spendDelta} text={formatDeltaPercent(spendDelta)} higherIsBetter={false} theme={theme} suffix="" />
+                      : <MoMEmpty theme={theme} />}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {marginDelta
+                      ? <MoMBadge delta={marginDelta} text={formatDeltaPp(marginDelta)} theme={theme} suffix="" />
+                      : <MoMEmpty theme={theme} />}
+                  </td>
+                  {perProjectAvailable && <td className="py-2 px-3" />}
+                </tr>
+              )}
             </tfoot>
           </table>
         </div>

@@ -1,9 +1,29 @@
 import React, { useState, useMemo } from 'react';
-import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
+import {
+  SapProjectFinancial,
+  AppTheme,
+  ContainerParamSettings,
+  ContainerLayoutConfig,
+  MonthlyKpiSnapshot
+} from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
 import { ContainerSlot } from './ContainerSlot';
+import { MoMBadge, MoMEmpty } from './MoMBadge';
+import { MonthlyKpiDetailModal, KpiMetricDefinition } from './MonthlyKpiDetailModal';
+import {
+  MonthlyMetricKey,
+  buildMonthlySeries,
+  buildSparkline,
+  computeDelta,
+  metricForMonth,
+  formatDeltaPercent,
+  formatDeltaAbs,
+  formatDeltaPp,
+  MONTH_ABBR,
+  MONTH_FULL
+} from '../utils/monthlyComparison';
 
 interface OnePageDashboardProps {
   projects: SapProjectFinancial[];
@@ -24,8 +44,10 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
   isPmo = false,
   monthlyHistory = []
 }) => {
+  // `isLight` / tema claro: mantido como código morto (ver T9 — tema fixo Neon).
   const isLight = theme === 'light';
   const [hoveredBurnupMonth, setHoveredBurnupMonth] = useState<number | null>(null);
+  const [expandedMetric, setExpandedMetric] = useState<KpiMetricDefinition | null>(null);
 
   // Filter projects by selected SAP solutions
   const filteredProjects = useMemo(() => {
@@ -40,10 +62,98 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     });
   }, [projects, selectedFilters]);
 
-  // Aggregates for Principais Informações
+  // ---------------------------------------------------------------------------
+  // O histórico mensal é AGREGADO DO PORTFÓLIO INTEIRO — não tem dimensão de
+  // solução. Com um filtro de frente ativo, comparar o cartão filtrado contra o
+  // histórico não-filtrado produziria um número errado. Então, sob filtro, os
+  // comparativos e sparklines são suprimidos e o cartão fica só com o valor.
+  // ---------------------------------------------------------------------------
+  const isPortfolioWide = selectedFilters.includes('TODOS') || selectedFilters.length === 0;
+
+  const today = useMemo(() => new Date(), []);
+  const currentYear = today.getFullYear();
+  const currentMonthIdx = today.getMonth(); // 0-11
+
+  // ---------------------------------------------------------------------------
+  // MÊS DE REFERÊNCIA DOS CARTÕES
+  // O mês corrente frequentemente ainda não fechou (a RSE do mês só é publicada
+  // no início do mês seguinte). Então a referência é o mês MAIS RECENTE que já
+  // existe no histórico. O chip no cabeçalho diz qual é, para não restar dúvida
+  // sobre a que período os quatro números se referem.
+  // ---------------------------------------------------------------------------
+  const referenceMonth = useMemo(() => {
+    const sorted = [...monthlyHistory]
+      .filter(h => h && h.monthKey)
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+    const latest = sorted[sorted.length - 1];
+    if (latest) return { year: latest.year, month: latest.month };
+    return { year: currentYear, month: currentMonthIdx + 1 };
+  }, [monthlyHistory, currentYear, currentMonthIdx]);
+
+  const hasHistory = monthlyHistory.length > 0;
+
+  // Aggregates ao vivo (estado atual dos projetos) — usados nos contêineres que
+  // não são "do mês": tabelas de contribuição, margem do mês corrente, etc.
   const totalBilled = filteredProjects.reduce((acc, p) => acc + p.billed, 0);
   const uniqueClients = new Set(filteredProjects.map(p => p.client)).size;
-  const totalGoLives = filteredProjects.length === 0 ? 0 : Math.max(1, Math.round(filteredProjects.length * 0.35));
+
+  // ---------------------------------------------------------------------------
+  // T2/T3 — CARTÕES COM DADO REAL
+  // Cada cartão lê um campo de MonthlyKpiSnapshot no mês de referência. Sem
+  // dado: o cartão mostra "—", sem sparkline e sem badge. Nunca há curva de
+  // enfeite nem variação estimada.
+  // ---------------------------------------------------------------------------
+  const buildCard = (
+    metric: MonthlyMetricKey,
+    options: { higherIsBetter?: boolean } = {}
+  ) => {
+    const value = metricForMonth(monthlyHistory, metric, referenceMonth.year, referenceMonth.month);
+    const series = buildMonthlySeries(monthlyHistory, metric, referenceMonth.year, referenceMonth.month, 7);
+    const delta = isPortfolioWide
+      ? computeDelta(monthlyHistory, metric, referenceMonth.year, referenceMonth.month)
+      : null;
+    const sparkline = isPortfolioWide ? buildSparkline(series) : null;
+    return { value, series, delta, sparkline, higherIsBetter: options.higherIsBetter !== false };
+  };
+
+  const cardRevenue = buildCard('revenueBilled');
+  const cardSpend = buildCard('totalSpend', { higherIsBetter: false });
+  const cardClients = buildCard('clientsServed');
+  const cardGoLives = buildCard('goLivesCompleted');
+
+  // Definições usadas pelo modal de expansão (T5) — mesmos campos dos cartões.
+  const METRIC_REVENUE: KpiMetricDefinition = {
+    key: 'revenueBilled',
+    label: 'Faturamento do mês',
+    format: v => formatCurrencyBRL(Math.round(v)),
+    color: isLight ? '#059669' : '#00FF88',
+    higherIsBetter: true,
+    chartStyle: 'line'
+  };
+  const METRIC_SPEND: KpiMetricDefinition = {
+    key: 'totalSpend',
+    label: 'Gasto total do mês',
+    format: v => formatCurrencyBRL(Math.round(v)),
+    color: isLight ? '#0284C7' : '#00D2FF',
+    higherIsBetter: false,
+    chartStyle: 'line'
+  };
+  const METRIC_CLIENTS: KpiMetricDefinition = {
+    key: 'clientsServed',
+    label: 'Clientes atendidos',
+    format: v => `${Math.round(v)}`,
+    color: isLight ? '#0284C7' : '#00D2FF',
+    higherIsBetter: true,
+    chartStyle: 'bar'
+  };
+  const METRIC_GOLIVES: KpiMetricDefinition = {
+    key: 'goLivesCompleted',
+    label: 'Go-lives concluídos',
+    format: v => `${Math.round(v)}`,
+    color: 'var(--exed-accent)',
+    higherIsBetter: true,
+    chartStyle: 'bar'
+  };
 
   // Top 5 Clientes - Contribuição na Receita
   const topRevenueClients = useMemo(() => {
@@ -57,8 +167,8 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     });
     return Array.from(clientMap.values())
       .sort((a, b) => b.billed - a.billed)
-      .slice(0, 5);
-  }, [filteredProjects]);
+      .slice(0, containerSettings?.topClientsLimit ?? 5);
+  }, [filteredProjects, containerSettings]);
 
   // Top 5 Clientes - Contribuição na Margem
   const topMarginClients = useMemo(() => {
@@ -78,26 +188,33 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
         margin: c.count > 0 ? (c.totalMargin / c.count).toFixed(1) : '0.0'
       }))
       .sort((a, b) => parseFloat(b.margin) - parseFloat(a.margin))
-      .slice(0, 5);
-  }, [filteredProjects]);
+      .slice(0, containerSettings?.topClientsLimit ?? 5);
+  }, [filteredProjects, containerSettings]);
 
-  // Current weighted average margin
+  // Margem média ponderada do estado atual dos projetos (mês corrente em curso)
   const currentAvgMargin = useMemo(() => {
-    if (filteredProjects.length === 0) return '24.0';
+    if (filteredProjects.length === 0) return null;
     const sum = filteredProjects.reduce((acc, p) => acc + p.marginPercent, 0);
-    return (sum / filteredProjects.length).toFixed(1);
+    return sum / filteredProjects.length;
   }, [filteredProjects]);
 
-  // Burnup Chart 12 Months Data (Annual Target vs Actual Accumulation)
-  const annualTargetM = (containerSettings?.annualRevenueTarget ?? 120000000) / 1000000;
-  const monthlyTargetStep = annualTargetM / 12;
-  const monthsBase = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  // ---------------------------------------------------------------------------
+  // T7 — METAS OPCIONAIS
+  // Sem meta configurada, a linha de meta NÃO é desenhada (antes o app caía num
+  // default de R$ 120 milhões que ninguém tinha configurado e que aparecia como
+  // se fosse uma meta real da empresa).
+  // ---------------------------------------------------------------------------
+  const rawRevenueTarget = containerSettings?.annualRevenueTarget;
+  const hasRevenueTarget = typeof rawRevenueTarget === 'number' && Number.isFinite(rawRevenueTarget) && rawRevenueTarget > 0;
+  const annualTargetM = hasRevenueTarget ? (rawRevenueTarget as number) / 1000000 : null;
 
-  const today = useMemo(() => new Date(), []);
-  const currentYear = today.getFullYear();
-  const currentMonthIdx = today.getMonth(); // 0-11
+  const rawMarginTarget = containerSettings?.contractMarginTarget;
+  const hasMarginTarget = typeof rawMarginTarget === 'number' && Number.isFinite(rawMarginTarget) && rawMarginTarget > 0;
+  const MARGIN_TARGET = hasMarginTarget ? (rawMarginTarget as number) : null;
 
-  // Mapa mês (0-11) -> dado real daquele mês no ano atual, vindo da migração/histórico
+  const monthsBase = MONTH_ABBR;
+
+  // Mapa mês (0-11) -> dado real daquele mês no ano atual, vindo da migração
   const historyByMonth = useMemo(() => {
     const map = new Map<number, MonthlyKpiSnapshot>();
     monthlyHistory
@@ -110,7 +227,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     let cumulative = 0;
     let brokeChain = false;
     return monthsBase.map((m, idx) => {
-      const targetAcc = Number((monthlyTargetStep * (idx + 1)).toFixed(1));
+      const targetAcc = annualTargetM !== null ? Number(((annualTargetM / 12) * (idx + 1)).toFixed(1)) : null;
       const entry = historyByMonth.get(idx);
       let actualAcc: number | null = null;
 
@@ -128,15 +245,22 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
         targetAcc,
         actualAcc,
         hasData: !!entry,
-        targetLabel: `R$ ${targetAcc.toFixed(1).replace('.', ',')}M`,
+        targetLabel: targetAcc !== null ? `R$ ${targetAcc.toFixed(1).replace('.', ',')}M` : null,
         actualLabel: actualAcc !== null ? `R$ ${actualAcc.toFixed(1).replace('.', ',')}M` : 'Sem dado migrado',
         current: idx === currentMonthIdx
       };
     });
-  }, [monthlyTargetStep, historyByMonth]);
+  }, [annualTargetM, historyByMonth, currentMonthIdx, monthsBase]);
 
-  // Escala Y do gráfico de burnup: 0 -> y=120 (piso), annualTargetM -> y=20 (topo)
-  const burnupYFromValueM = (valueM: number) => Math.max(8, Math.min(128, 120 - (valueM / annualTargetM) * 100));
+  // Escala Y do burnup: com meta, o topo é a meta anual (como antes). Sem meta,
+  // o topo vem do próprio dado acumulado, com 15% de folga.
+  const burnupScaleMax = useMemo(() => {
+    if (annualTargetM !== null) return annualTargetM;
+    const maxActual = burnupMonths.reduce((max, m) => (m.actualAcc !== null && m.actualAcc > max ? m.actualAcc : max), 0);
+    return maxActual > 0 ? maxActual * 1.15 : 1;
+  }, [annualTargetM, burnupMonths]);
+
+  const burnupYFromValueM = (valueM: number) => Math.max(8, Math.min(128, 120 - (valueM / burnupScaleMax) * 100));
   const burnupPointsWithData = burnupMonths
     .map((m, idx) => ({ ...m, idx }))
     .filter(m => m.actualAcc !== null);
@@ -144,10 +268,8 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     .map((m, i) => `${i === 0 ? 'M' : 'L'} ${50 + m.idx * 90} ${burnupYFromValueM(m.actualAcc as number)}`)
     .join(' ');
 
-  // 12 Months Margin Data — usa dado real migrado quando existe; mês atual usa a
-  // média calculada dos projetos ativos agora; meses futuros mostram a meta
-  // (visualmente esmaecidos); meses passados sem migração ficam "sem dado".
-  const MARGIN_TARGET = containerSettings?.contractMarginTarget ?? 24.0;
+  // 12 meses de margem — dado real migrado quando existe; mês corrente usa a
+  // média calculada dos projetos ativos agora; meses futuros ficam vazios.
   const marginMonths = useMemo(() => {
     return monthsBase.map((m, idx) => {
       const isCurrent = idx === currentMonthIdx;
@@ -155,46 +277,59 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
       const entry = historyByMonth.get(idx);
 
       let value: number | null = null;
-      let hasData = false;
-      if (isCurrent) {
-        value = parseFloat(currentAvgMargin);
-        hasData = true;
-      } else if (entry) {
+      if (entry) {
         value = entry.marginAvg;
-        hasData = true;
-      } else if (isFuture) {
-        value = MARGIN_TARGET;
-        hasData = false;
+      } else if (isCurrent && currentAvgMargin !== null) {
+        value = currentAvgMargin;
       }
 
-      return { month: m, value, isCurrent, isFuture, hasData };
+      return { month: m, value, isCurrent, isFuture, hasData: !!entry };
     });
-  }, [historyByMonth, currentAvgMargin, currentMonthIdx, MARGIN_TARGET]);
+  }, [historyByMonth, currentAvgMargin, currentMonthIdx, monthsBase]);
 
-  // Client monogram helper
-  const getClientInitials = (name: string) => {
-    return name
-      .split(' ')
-      .filter(w => w.length > 2)
-      .slice(0, 2)
-      .map(w => w[0].toUpperCase())
-      .join('');
-  };
+  const marginValues = marginMonths.map(m => m.value).filter((v): v is number => v !== null);
+  const marginAverage = marginValues.length > 0
+    ? marginValues.reduce((a, b) => a + b, 0) / marginValues.length
+    : null;
 
-  // Mathematical baseline and bar height parameters for SVG margin chart
-  // Coordinate space: viewBox="0 0 1000 145"
-  // Floor y = 114. Max margin = 35.0%. Range = 82.
-  const MARGIN_MAX = 35.0;
+  // Referência de cor das barras: a meta quando existe, senão a média do período.
+  const marginColorBaseline = MARGIN_TARGET ?? marginAverage;
+
+  // Topo do eixo: acomoda qualquer mês acima de 35% em vez de estourar a barra.
+  const MARGIN_MAX = useMemo(() => {
+    const maxValue = marginValues.length > 0 ? Math.max(...marginValues) : 0;
+    const withTarget = MARGIN_TARGET !== null ? Math.max(maxValue, MARGIN_TARGET) : maxValue;
+    return Math.max(35, Math.ceil((withTarget * 1.15) / 5) * 5);
+  }, [marginValues, MARGIN_TARGET]);
+
   const MARGIN_FLOOR_Y = 114;
   const MARGIN_SPAN_Y = 82;
-  const targetBaselineY = MARGIN_FLOOR_Y - (MARGIN_TARGET / MARGIN_MAX) * MARGIN_SPAN_Y;
+  const targetBaselineY = MARGIN_TARGET !== null
+    ? MARGIN_FLOOR_Y - (MARGIN_TARGET / MARGIN_MAX) * MARGIN_SPAN_Y
+    : null;
+
+  // Variação da margem do mês de referência contra o mês anterior (histórico)
+  const marginDelta = isPortfolioWide
+    ? computeDelta(monthlyHistory, 'marginAvg', referenceMonth.year, referenceMonth.month)
+    : null;
+  const referenceMarginValue = metricForMonth(monthlyHistory, 'marginAvg', referenceMonth.year, referenceMonth.month);
+
+  const referenceLabel = `${MONTH_FULL[referenceMonth.month - 1]}/${referenceMonth.year}`;
+
+  // Classes compartilhadas dos cartões
+  const cardValueClass = `text-lg sm:text-xl font-black tracking-tight my-0.5 ${
+    isLight ? 'text-slate-900' : 'text-white'
+  }`;
+  const emptyValueClass = `text-lg sm:text-xl font-black tracking-tight my-0.5 ${
+    isLight ? 'text-slate-300' : 'text-slate-600'
+  }`;
 
   return (
     <div className={`w-full flex flex-col gap-2 max-w-[1600px] mx-auto ${
       isLight ? 'text-slate-900' : 'text-slate-100'
     }`}>
       {/* ========================================================================= */}
-      {/* 1. PRINCIPAIS INFORMAÇÕES - 4 CAIXAS NA HORIZONTAL                        */}
+      {/* 1. PRINCIPAIS INFORMAÇÕES DO MÊS - 4 CAIXAS NA HORIZONTAL                 */}
       {/* ========================================================================= */}
       <ContainerSlot id="one_page__principais_informacoes" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
@@ -202,207 +337,273 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           ? 'bg-white border-slate-200 shadow-sm'
           : 'bg-[#0A1C30] border-[#16385C] shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
       }`}>
-        <div className={`text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
+        <div className={`flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
           isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
         }`}>
-          Principais informações
+          <span>Principais informações do mês</span>
+          <div className="flex items-center gap-2">
+            {hasHistory && (
+              <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 border normal-case ${
+                isLight
+                  ? 'bg-slate-100 text-slate-700 border-slate-300'
+                  : 'bg-[#071626] text-exed-accent border-exed-accent/30'
+              }`}>
+                {referenceLabel}
+              </span>
+            )}
+            {!isPortfolioWide && (
+              <span
+                className={`text-[9px] font-semibold px-1.5 py-0.5 border normal-case ${
+                  isLight ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                }`}
+                title="O histórico mensal é agregado do portfólio inteiro e não separa por frente de solução. Com um filtro ativo, os comparativos seriam calculados sobre uma base diferente da mostrada, então ficam ocultos."
+              >
+                Comparativos ocultos sob filtro
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          {/* Card 1: FATURAMENTO TOTAL - Verde */}
-          <div className={`p-2 flex flex-col justify-between border transition-colors ${
-            isLight
-              ? 'bg-slate-50 border-slate-200 hover:border-emerald-500'
-              : 'bg-[#071626] border-[#16385C] hover:border-[#00FF88]/50'
-          }`}>
+          {/* Card 1: FATURAMENTO DO MÊS - Verde */}
+          <button
+            type="button"
+            onClick={() => setExpandedMetric(METRIC_REVENUE)}
+            title="Clique para ver o histórico mês a mês"
+            className={`text-left p-2 flex flex-col justify-between border transition-colors cursor-pointer ${
+              isLight
+                ? 'bg-slate-50 border-slate-200 hover:border-emerald-500'
+                : 'bg-[#071626] border-[#16385C] hover:border-[#00FF88]/50'
+            }`}
+          >
             <div className="flex items-center justify-between gap-1 mb-1">
               <span className={`text-[10px] font-extrabold tracking-wider uppercase ${
                 isLight ? 'text-emerald-700' : 'text-[#00FF88]'
               }`}>
-                FATURAMENTO TOTAL
+                FATURAMENTO DO MÊS
               </span>
-              <span className={`text-[9px] font-semibold px-1 py-0.2 border ${
-                isLight
-                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                  : 'text-[#00FF88] bg-[#00FF88]/10 border-[#00FF88]/30'
-              }`}>
-                +8.4% vs mês ant.
-              </span>
+              {cardRevenue.delta
+                ? <MoMBadge delta={cardRevenue.delta} text={formatDeltaPercent(cardRevenue.delta)} theme={theme} />
+                : isPortfolioWide && <MoMEmpty theme={theme} />}
             </div>
-            <div className={`text-lg sm:text-xl font-black tracking-tight my-0.5 ${
-              isLight ? 'text-slate-900' : 'text-white'
-            }`}>
-              {formatCurrencyBRL(totalBilled || 9850000)}
+            <div className={cardRevenue.value !== null ? cardValueClass : emptyValueClass}>
+              {cardRevenue.value !== null ? formatCurrencyBRL(cardRevenue.value) : '—'}
             </div>
-            {/* Sparkline Line Chart Verde */}
+            {/* Sparkline: só existe com 2+ meses migrados */}
             <div className="h-5 w-full pt-0.5">
-              <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
-                <defs>
-                  <linearGradient id="gradGreen" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#00FF88" stopOpacity={isLight ? '0.15' : '0.3'} />
-                    <stop offset="100%" stopColor="#00FF88" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-                <polygon points="0,22 30,20 65,14 100,16 135,10 170,8 200,4 200,30 0,30" fill="url(#gradGreen)" />
-                <polyline
-                  fill="none"
-                  stroke={isLight ? '#059669' : '#00FF88'}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  points="0,22 30,20 65,14 100,16 135,10 170,8 200,4"
-                />
-                <circle cx="200" cy="4" r="2.5" fill={isLight ? '#059669' : '#00FF88'} />
-              </svg>
+              {cardRevenue.sparkline ? (
+                <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
+                  <defs>
+                    <linearGradient id="gradGreen" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#00FF88" stopOpacity={isLight ? '0.15' : '0.3'} />
+                      <stop offset="100%" stopColor="#00FF88" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <polygon points={cardRevenue.sparkline.areaPoints} fill="url(#gradGreen)" />
+                  <polyline
+                    fill="none"
+                    stroke={isLight ? '#059669' : '#00FF88'}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={cardRevenue.sparkline.linePoints}
+                  />
+                  <circle
+                    cx={cardRevenue.sparkline.last.x}
+                    cy={cardRevenue.sparkline.last.y}
+                    r="2.5"
+                    fill={isLight ? '#059669' : '#00FF88'}
+                  />
+                </svg>
+              ) : null}
             </div>
-          </div>
+          </button>
 
-          {/* Card 2: GASTO TOTAL - Verde quando cai (lógica de redução de custos favorável) */}
-          <div className={`p-2 flex flex-col justify-between border transition-colors ${
-            isLight
-              ? 'bg-slate-50 border-slate-200 hover:border-emerald-500'
-              : 'bg-[#071626] border-[#16385C] hover:border-[#00FF88]/50'
-          }`}>
+          {/* Card 2: GASTO TOTAL DO MÊS - queda é favorável */}
+          <button
+            type="button"
+            onClick={() => setExpandedMetric(METRIC_SPEND)}
+            title="Clique para ver o histórico mês a mês"
+            className={`text-left p-2 flex flex-col justify-between border transition-colors cursor-pointer ${
+              isLight
+                ? 'bg-slate-50 border-slate-200 hover:border-emerald-500'
+                : 'bg-[#071626] border-[#16385C] hover:border-[#00FF88]/50'
+            }`}
+          >
             <div className="flex items-center justify-between gap-1 mb-1">
               <span className={`text-[10px] font-extrabold tracking-wider uppercase ${
                 isLight ? 'text-slate-700' : 'text-slate-300'
               }`}>
-                GASTO TOTAL
+                GASTO TOTAL DO MÊS
               </span>
-              {/* Quando o gasto cai (-3.2%), é favorável e fica verde */}
-              <span className={`text-[9px] font-semibold px-1 py-0.2 border ${
-                isLight
-                  ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                  : 'text-[#00FF88] bg-[#00FF88]/10 border-[#00FF88]/30'
-              }`}>
-                -3.2% vs mês ant.
-              </span>
+              {cardSpend.delta
+                ? <MoMBadge delta={cardSpend.delta} text={formatDeltaPercent(cardSpend.delta)} higherIsBetter={false} theme={theme} />
+                : isPortfolioWide && <MoMEmpty theme={theme} />}
             </div>
-            <div className={`text-lg sm:text-xl font-black tracking-tight my-0.5 ${
-              isLight ? 'text-slate-900' : 'text-white'
-            }`}>
-              R$ 10.265.000
+            <div className={cardSpend.value !== null ? cardValueClass : emptyValueClass}>
+              {cardSpend.value !== null ? formatCurrencyBRL(cardSpend.value) : '—'}
             </div>
-            {/* Sparkline Line Chart: gasto em queda com indicador verde */}
             <div className="h-5 w-full pt-0.5">
-              <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
-                <defs>
-                  <linearGradient id="gradSpendGreen" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#00FF88" stopOpacity={isLight ? '0.15' : '0.25'} />
-                    <stop offset="100%" stopColor="#00FF88" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-                <polygon points="0,8 30,12 65,10 100,18 135,15 170,22 200,20 200,30 0,30" fill="url(#gradSpendGreen)" />
-                <polyline
-                  fill="none"
-                  stroke={isLight ? '#059669' : '#00FF88'}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  points="0,8 30,12 65,10 100,18 135,15 170,22 200,20"
-                />
-                <circle cx="200" cy="20" r="2.5" fill={isLight ? '#059669' : '#00FF88'} />
-              </svg>
+              {cardSpend.sparkline ? (
+                <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
+                  <defs>
+                    <linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#00D2FF" stopOpacity={isLight ? '0.15' : '0.25'} />
+                      <stop offset="100%" stopColor="#00D2FF" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <polygon points={cardSpend.sparkline.areaPoints} fill="url(#gradSpend)" />
+                  <polyline
+                    fill="none"
+                    stroke={isLight ? '#0284C7' : '#00D2FF'}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={cardSpend.sparkline.linePoints}
+                  />
+                  <circle
+                    cx={cardSpend.sparkline.last.x}
+                    cy={cardSpend.sparkline.last.y}
+                    r="2.5"
+                    fill={isLight ? '#0284C7' : '#00D2FF'}
+                  />
+                </svg>
+              ) : null}
             </div>
-          </div>
+          </button>
 
           {/* Card 3: Total de clientes atendidos - Azul */}
-          <div className={`p-2 flex flex-col justify-between border transition-colors ${
-            isLight
-              ? 'bg-slate-50 border-slate-200 hover:border-blue-500'
-              : 'bg-[#071626] border-[#16385C] hover:border-[#00D2FF]/50'
-          }`}>
+          <button
+            type="button"
+            onClick={() => setExpandedMetric(METRIC_CLIENTS)}
+            title="Clique para ver o histórico mês a mês"
+            className={`text-left p-2 flex flex-col justify-between border transition-colors cursor-pointer ${
+              isLight
+                ? 'bg-slate-50 border-slate-200 hover:border-blue-500'
+                : 'bg-[#071626] border-[#16385C] hover:border-[#00D2FF]/50'
+            }`}
+          >
             <div className="flex items-center justify-between gap-1 mb-1">
               <span className={`text-[10px] font-extrabold tracking-wider uppercase ${
                 isLight ? 'text-blue-700' : 'text-[#00D2FF]'
               }`}>
                 Total de clientes atendidos
               </span>
-              <span className={`text-[9px] font-semibold px-1 py-0.2 border ${
-                isLight
-                  ? 'text-blue-700 bg-blue-50 border-blue-200'
-                  : 'text-[#00D2FF] bg-[#00D2FF]/10 border-[#00D2FF]/30'
-              }`}>
-                +2 novos
+              {cardClients.delta
+                ? <MoMBadge delta={cardClients.delta} text={formatDeltaAbs(cardClients.delta)} theme={theme} />
+                : isPortfolioWide && <MoMEmpty theme={theme} />}
+            </div>
+            <div className={cardClients.value !== null ? cardValueClass : cardValueClass}>
+              {cardClients.value !== null ? cardClients.value : uniqueClients}{' '}
+              <span className="text-xs font-normal text-slate-400">
+                clientes
+                {cardClients.value === null && (
+                  <span
+                    className="ml-1 text-[9px] italic"
+                    title="Contagem ao vivo dos projetos ativos. O mês de referência ainda não tem clientsServed migrado, então não há comparativo."
+                  >
+                    (atual)
+                  </span>
+                )}
               </span>
             </div>
-            <div className={`text-lg sm:text-xl font-black tracking-tight my-0.5 ${
-              isLight ? 'text-slate-900' : 'text-white'
-            }`}>
-              {uniqueClients} <span className="text-xs font-normal text-slate-400">empresas</span>
-            </div>
-            {/* Sparkline Azul */}
             <div className="h-5 w-full pt-0.5">
-              <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
-                <defs>
-                  <linearGradient id="gradBlue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#00D2FF" stopOpacity={isLight ? '0.15' : '0.3'} />
-                    <stop offset="100%" stopColor="#00D2FF" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-                <polygon points="0,24 35,20 70,18 105,14 140,11 175,8 200,6 200,30 0,30" fill="url(#gradBlue)" />
-                <polyline
-                  fill="none"
-                  stroke={isLight ? '#0284C7' : '#00D2FF'}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  points="0,24 35,20 70,18 105,14 140,11 175,8 200,6"
-                />
-                <circle cx="200" cy="6" r="2.5" fill={isLight ? '#0284C7' : '#00D2FF'} />
-              </svg>
+              {cardClients.sparkline ? (
+                <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
+                  <defs>
+                    <linearGradient id="gradBlue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#00D2FF" stopOpacity={isLight ? '0.15' : '0.3'} />
+                      <stop offset="100%" stopColor="#00D2FF" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <polygon points={cardClients.sparkline.areaPoints} fill="url(#gradBlue)" />
+                  <polyline
+                    fill="none"
+                    stroke={isLight ? '#0284C7' : '#00D2FF'}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={cardClients.sparkline.linePoints}
+                  />
+                  <circle
+                    cx={cardClients.sparkline.last.x}
+                    cy={cardClients.sparkline.last.y}
+                    r="2.5"
+                    fill={isLight ? '#0284C7' : '#00D2FF'}
+                  />
+                </svg>
+              ) : null}
             </div>
-          </div>
+          </button>
 
-          {/* Card 4: Total de Go-Lives no mês - Laranja */}
-          <div className={`p-2 flex flex-col justify-between border transition-colors ${
-            isLight
-              ? 'bg-slate-50 border-slate-200 hover:border-orange-500'
-              : 'bg-[#071626] border-[#16385C] hover:border-[#F26522]/50'
-          }`}>
+          {/* Card 4: Total de Go-Lives no mês */}
+          <button
+            type="button"
+            onClick={() => setExpandedMetric(METRIC_GOLIVES)}
+            title="Clique para ver o histórico mês a mês"
+            className={`text-left p-2 flex flex-col justify-between border transition-colors cursor-pointer ${
+              isLight
+                ? 'bg-slate-50 border-slate-200 hover:border-exed-accent'
+                : 'bg-[#071626] border-[#16385C] hover:border-exed-accent/50'
+            }`}
+          >
             <div className="flex items-center justify-between gap-1 mb-1">
-              <span className={`text-[10px] font-extrabold tracking-wider uppercase ${
-                isLight ? 'text-[#F26522]' : 'text-[#F26522]'
-              }`}>
+              <span className="text-[10px] font-extrabold tracking-wider uppercase text-exed-accent">
                 Total de Go-Lives no mês
               </span>
-              <span className={`text-[9px] font-semibold px-1 py-0.2 border ${
-                isLight
-                  ? 'text-[#F26522] bg-orange-50 border-orange-200'
-                  : 'text-[#F26522] bg-[#F26522]/10 border-[#F26522]/30'
-              }`}>
-                +1 vs mês ant.
-              </span>
+              {cardGoLives.delta
+                ? <MoMBadge delta={cardGoLives.delta} text={formatDeltaAbs(cardGoLives.delta)} theme={theme} />
+                : isPortfolioWide && <MoMEmpty theme={theme} />}
             </div>
-            <div className={`text-lg sm:text-xl font-black tracking-tight my-0.5 ${
-              isLight ? 'text-slate-900' : 'text-white'
-            }`}>
-              {totalGoLives} <span className="text-xs font-normal text-slate-400">projetos ativados</span>
+            <div className={cardGoLives.value !== null ? cardValueClass : emptyValueClass}>
+              {cardGoLives.value !== null ? cardGoLives.value : '—'}{' '}
+              {cardGoLives.value !== null && (
+                <span className="text-xs font-normal text-slate-400">projetos ativados</span>
+              )}
             </div>
-            {/* Sparkline Laranja */}
             <div className="h-5 w-full pt-0.5">
-              <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
-                <defs>
-                  <linearGradient id="gradOrange" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#F26522" stopOpacity={isLight ? '0.15' : '0.3'} />
-                    <stop offset="100%" stopColor="#F26522" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-                <polygon points="0,26 30,22 65,24 100,16 135,13 170,8 200,4 200,30 0,30" fill="url(#gradOrange)" />
-                <polyline
-                  fill="none"
-                  stroke="#F26522"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  points="0,26 30,22 65,24 100,16 135,13 170,8 200,4"
-                />
-                <circle cx="200" cy="4" r="2.5" fill="#F26522" />
-              </svg>
+              {cardGoLives.sparkline ? (
+                <svg className="w-full h-full overflow-visible" viewBox="0 0 200 30">
+                  <defs>
+                    <linearGradient id="gradAccent" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="var(--exed-accent)" stopOpacity={isLight ? '0.15' : '0.3'} />
+                      <stop offset="100%" stopColor="var(--exed-accent)" stopOpacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <polygon points={cardGoLives.sparkline.areaPoints} fill="url(#gradAccent)" />
+                  <polyline
+                    fill="none"
+                    stroke="var(--exed-accent)"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    points={cardGoLives.sparkline.linePoints}
+                  />
+                  <circle
+                    cx={cardGoLives.sparkline.last.x}
+                    cy={cardGoLives.sparkline.last.y}
+                    r="2.5"
+                    fill="var(--exed-accent)"
+                  />
+                </svg>
+              ) : null}
             </div>
-          </div>
+          </button>
         </div>
+
+        {!hasHistory && (
+          <div className={`mt-2 text-[10px] italic px-2 py-1.5 border ${
+            isLight ? 'bg-slate-50 border-slate-200 text-slate-500' : 'bg-[#071626] border-slate-800 text-slate-400'
+          }`}>
+            Nenhum mês migrado no histórico ainda — os cartões ficam em "—" até a carga dos dados.
+            Preencha em Configurações → Histórico Mensal ou rode a migração das RSE.
+          </div>
+        )}
       </div>
       </ContainerSlot>
 
       {/* ========================================================================= */}
-      {/* 2. META DE RECEITA - BURNUP CHART (ESTÁTICO, SEM ANIMAÇÃO CONFORME PEDIDO) */}
+      {/* 2. RECEITA ACUMULADA - BURNUP CHART (ESTÁTICO, SEM ANIMAÇÃO)              */}
       {/* ========================================================================= */}
       <ContainerSlot id="one_page__meta_receita" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
@@ -416,13 +617,17 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           <span className={`text-xs font-bold uppercase tracking-wide ${
             isLight ? 'text-slate-900' : 'text-white'
           }`}>
-            Meta de receita
+            Receita acumulada
           </span>
           <div className="flex items-center gap-3 text-[10px]">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3 h-0.5 border-b border-dashed border-slate-400"></span>
-              <span className={isLight ? 'text-slate-600' : 'text-slate-300'}>Linha Base Meta (R$ {annualTargetM.toFixed(0)}M)</span>
-            </div>
+            {/* T7: a linha base só aparece quando existe meta configurada, e o
+                valor da meta não é mais escrito na interface. */}
+            {hasRevenueTarget && (
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 border-b border-dashed border-slate-400"></span>
+                <span className={isLight ? 'text-slate-600' : 'text-slate-300'}>Linha base</span>
+              </div>
+            )}
             <div className="flex items-center gap-1.5">
               <span className={`w-3 h-1 ${isLight ? 'bg-emerald-600' : 'bg-[#00FF88]'}`}></span>
               <span className={`font-semibold ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
@@ -459,25 +664,27 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                   y1="15"
                   x2={x}
                   y2="128"
-                  stroke={m.current ? '#F26522' : isLight ? '#E2E8F0' : '#10253D'}
+                  stroke={m.current ? 'var(--exed-accent)' : isLight ? '#E2E8F0' : '#10253D'}
                   strokeWidth={m.current ? '1.5' : '1'}
                   strokeDasharray={m.current ? '2 2' : 'none'}
                 />
               );
             })}
 
-            {/* Target Baseline: diagonal from Jan (10M) to Dez (120M) */}
-            <line
-              x1="50"
-              y1="120"
-              x2="1040"
-              y2="20"
-              stroke={isLight ? '#94A3B8' : '#64748B'}
-              strokeWidth="1.5"
-              strokeDasharray="5 4"
-            />
+            {/* Linha base da meta: só desenhada quando há meta configurada */}
+            {hasRevenueTarget && (
+              <line
+                x1="50"
+                y1={burnupYFromValueM((annualTargetM as number) / 12)}
+                x2="1040"
+                y2={burnupYFromValueM(annualTargetM as number)}
+                stroke={isLight ? '#94A3B8' : '#64748B'}
+                strokeWidth="1.5"
+                strokeDasharray="5 4"
+              />
+            )}
 
-            {/* Actual Realized Revenue Path (calculado a partir do histórico real migrado) */}
+            {/* Faturamento real acumulado (calculado a partir do histórico migrado) */}
             {burnupPathD && (
               <path
                 d={burnupPathD}
@@ -489,7 +696,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               />
             )}
 
-            {/* Month Data Points on Real Line (posição calculada a partir do dado real) */}
+            {/* Pontos nos meses com dado real */}
             {burnupPointsWithData.map(m => {
                 const x = 50 + m.idx * 90;
                 const y = burnupYFromValueM(m.actualAcc as number);
@@ -506,7 +713,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                       cx={x}
                       cy={y}
                       r={isCurrent ? '4.5' : '3.5'}
-                      fill={isCurrent ? '#F26522' : isLight ? '#059669' : '#00FF88'}
+                      fill={isCurrent ? 'var(--exed-accent)' : isLight ? '#059669' : '#00FF88'}
                       stroke={isLight ? '#FFFFFF' : '#06121E'}
                       strokeWidth="1.5"
                     />
@@ -524,13 +731,15 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                   x={x}
                   y="144"
                   textAnchor="middle"
-                  className={`text-[10px] font-bold ${
+                  fill={
                     isCurrent
-                      ? 'fill-[#F26522]'
+                      ? 'var(--exed-accent)'
                       : m.actualAcc !== null
-                      ? isLight ? 'fill-slate-700' : 'fill-slate-300'
-                      : isLight ? 'fill-slate-400' : 'fill-slate-600'
-                  }`}
+                      ? isLight ? '#334155' : '#CBD5E1'
+                      : isLight ? '#94A3B8' : '#475569'
+                  }
+                  fontSize="10"
+                  fontWeight="bold"
                 >
                   {m.month}
                 </text>
@@ -557,9 +766,6 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               <div className={`font-bold text-[10px] ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
                 Real: {burnupMonths[hoveredBurnupMonth].actualLabel}
               </div>
-              <div className="text-slate-400 text-[9px]">
-                Meta: {burnupMonths[hoveredBurnupMonth].targetLabel}
-              </div>
             </div>
           )}
         </div>
@@ -567,7 +773,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
       </ContainerSlot>
 
       {/* ========================================================================= */}
-      {/* 3. META DE MARGEM - 25% QUADRADO META ATUAL + 75% GRÁFICO DE COLUNAS       */}
+      {/* 3. EVOLUÇÃO DA MARGEM - 25% MÊS DE REFERÊNCIA + 75% GRÁFICO DE COLUNAS    */}
       {/* ========================================================================= */}
       <ContainerSlot id="one_page__meta_margem" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
@@ -578,11 +784,11 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
         <div className={`text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
           isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
         }`}>
-          Meta de margem
+          Evolução da margem
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-2.5 items-stretch">
-          {/* Left 25% - Quadrado mostrando a meta atual */}
+          {/* Esquerda 25% — margem do mês de referência + variação real */}
           <div className={`lg:col-span-1 p-2.5 flex flex-col justify-between border ${
             isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#071626] border-[#1E436E]'
           }`}>
@@ -590,12 +796,17 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               <div className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${
                 isLight ? 'text-slate-600' : 'text-slate-400'
               }`}>
-                META DE MARGEM
+                Margem do mês {hasHistory ? `(${referenceLabel})` : ''}
               </div>
-              <div className={`text-2xl font-black tracking-tight ${
-                isLight ? 'text-slate-900' : 'text-white'
-              }`}>
-                {MARGIN_TARGET.toFixed(1)}%
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className={`text-2xl font-black tracking-tight ${
+                  isLight ? 'text-slate-900' : 'text-white'
+                }`}>
+                  {referenceMarginValue !== null ? `${referenceMarginValue.toFixed(1)}%` : '—'}
+                </span>
+                {marginDelta
+                  ? <MoMBadge delta={marginDelta} text={formatDeltaPp(marginDelta)} theme={theme} suffix="" />
+                  : isPortfolioWide && <MoMEmpty theme={theme} />}
               </div>
             </div>
 
@@ -603,42 +814,34 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               <div className={`text-[9px] font-bold uppercase tracking-wider mb-0.5 ${
                 isLight ? 'text-slate-600' : 'text-slate-400'
               }`}>
-                Mês Atual ({monthsBase[currentMonthIdx]})
+                Mês corrente ({monthsBase[currentMonthIdx]}) — projetos ativos
               </div>
-              <div className="flex items-baseline gap-2">
-                <span className={`text-xl font-black ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
-                  {currentAvgMargin}%
-                </span>
-                <span className={`text-[9px] font-bold px-1 py-0.2 border ${
-                  isLight
-                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                    : 'text-[#00FF88] bg-[#00FF88]/10 border-[#00FF88]/30'
-                }`}>
-                  +{(parseFloat(currentAvgMargin) - MARGIN_TARGET).toFixed(1)} p.p.
-                </span>
-              </div>
+              <span className={`text-xl font-black ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
+                {currentAvgMargin !== null ? `${currentAvgMargin.toFixed(1)}%` : '—'}
+              </span>
             </div>
           </div>
 
-          {/* Right 75% - Gráfico de colunas com layout e espaçamento ajustados para evitar sobreposição */}
+          {/* Direita 75% — gráfico de colunas */}
           <div className={`lg:col-span-3 p-2 flex flex-col justify-between border ${
             isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#071626] border-[#1E436E]'
           }`}>
             <div className="relative w-full h-32 sm:h-36 select-none">
               <svg className="w-full h-full overflow-visible" viewBox="0 0 1000 145" preserveAspectRatio="none">
-                {/* Baseline line at EXACT 24.0% height (rendered behind all bars and labels) */}
-                <line
-                  x1="35"
-                  y1={targetBaselineY}
-                  x2="975"
-                  y2={targetBaselineY}
-                  stroke={isLight ? '#0284C7' : '#00D2FF'}
-                  strokeWidth="1.5"
-                  strokeDasharray="5 4"
-                  opacity="0.8"
-                />
+                {/* Linha base da meta: só quando existe meta configurada */}
+                {targetBaselineY !== null && (
+                  <line
+                    x1="35"
+                    y1={targetBaselineY}
+                    x2="975"
+                    y2={targetBaselineY}
+                    stroke={isLight ? '#0284C7' : '#00D2FF'}
+                    strokeWidth="1.5"
+                    strokeDasharray="5 4"
+                    opacity="0.8"
+                  />
+                )}
 
-                {/* 12 Month Columns with ample spacing and adjusted label heights */}
                 {marginMonths.map((m, idx) => {
                   const colWidth = 28;
                   const colSpacing = 77;
@@ -647,7 +850,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                   const isFuture = !!m.isFuture;
 
                   if (m.value === null) {
-                    // Mês passado sem dado migrado ainda: sem barra, só um indicador discreto
+                    // Mês sem dado migrado: sem barra, só um indicador discreto
                     return (
                       <g key={m.month}>
                         <line
@@ -659,16 +862,18 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                           strokeWidth="2"
                           strokeDasharray="3 2"
                         />
-                        <text
-                          x={x + colWidth / 2}
-                          y={MARGIN_FLOOR_Y - 6}
-                          textAnchor="middle"
-                          fill={isLight ? '#94A3B8' : '#475569'}
-                          fontSize="7.5"
-                          fontStyle="italic"
-                        >
-                          s/ dado
-                        </text>
+                        {!isFuture && (
+                          <text
+                            x={x + colWidth / 2}
+                            y={MARGIN_FLOOR_Y - 6}
+                            textAnchor="middle"
+                            fill={isLight ? '#94A3B8' : '#475569'}
+                            fontSize="7.5"
+                            fontStyle="italic"
+                          >
+                            s/ dado
+                          </text>
+                        )}
                         <text
                           x={x + colWidth / 2}
                           y="128"
@@ -684,20 +889,17 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
 
                   const barHeight = (m.value / MARGIN_MAX) * MARGIN_SPAN_Y;
                   const barY = MARGIN_FLOOR_Y - barHeight;
-                  const exceedsTarget = m.value >= MARGIN_TARGET;
-                  const isBelowAverage = !exceedsTarget;
+                  // Com meta: acima/abaixo da meta. Sem meta: acima/abaixo da
+                  // média do próprio período. Nunca uma referência inventada.
+                  const aboveBaseline = marginColorBaseline === null ? true : m.value >= marginColorBaseline;
+                  const isBelowBaseline = !aboveBaseline;
 
                   const barFill = isLight
-                    ? exceedsTarget
-                      ? '#059669'
-                      : '#DC2626'
-                    : exceedsTarget
-                    ? '#00FF88'
-                    : '#FF3366';
+                    ? aboveBaseline ? '#059669' : '#DC2626'
+                    : aboveBaseline ? '#00FF88' : '#FF3366';
 
-                  // When below average, percentage is placed INSIDE the bar; otherwise above the bar
-                  const textY = isBelowAverage ? barY + 11 : barY - 5;
-                  const textColor = isBelowAverage
+                  const textY = isBelowBaseline ? barY + 11 : barY - 5;
+                  const textColor = isBelowBaseline
                     ? '#FFFFFF'
                     : isCurrent
                     ? isLight ? '#059669' : '#00FF88'
@@ -705,17 +907,15 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
 
                   return (
                     <g key={m.month}>
-                      {/* Column Bar */}
                       <rect
                         x={x}
                         y={barY}
                         width={colWidth}
                         height={barHeight}
                         fill={barFill}
-                        opacity={isFuture ? 0.35 : 1.0}
+                        opacity={m.hasData ? 1.0 : 0.55}
                       />
 
-                      {/* Current Month Highlight Outline */}
                       {isCurrent && (
                         <rect
                           x={x - 1.5}
@@ -728,27 +928,25 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                         />
                       )}
 
-                      {/* Value label placed inside the bar if below average, above if above average */}
                       <text
                         x={x + colWidth / 2}
                         y={textY}
                         textAnchor="middle"
                         fill={textColor}
-                        fontSize={isBelowAverage ? '8.5' : '9'}
+                        fontSize={isBelowBaseline ? '8.5' : '9'}
                         fontFamily="monospace"
-                        fontWeight={isBelowAverage || isCurrent ? 'bold' : 'normal'}
+                        fontWeight={isBelowBaseline || isCurrent ? 'bold' : 'normal'}
                       >
                         {m.value.toFixed(1)}%
                       </text>
 
-                      {/* Month label below floor */}
                       <text
                         x={x + colWidth / 2}
                         y="128"
                         textAnchor="middle"
                         fill={
                           isCurrent
-                            ? '#F26522'
+                            ? 'var(--exed-accent)'
                             : isFuture
                             ? isLight ? '#94A3B8' : '#475569'
                             : isLight ? '#334155' : '#CBD5E1'
@@ -759,13 +957,12 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                         {m.month}
                       </text>
 
-                      {/* Mês Atual indicator badge under month */}
                       {isCurrent && (
                         <text
                           x={x + colWidth / 2}
                           y="139"
                           textAnchor="middle"
-                          fill="#F26522"
+                          fill="var(--exed-accent)"
                           fontSize="7"
                           fontWeight="bold"
                         >
@@ -783,7 +980,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
       </ContainerSlot>
 
       {/* ========================================================================= */}
-      {/* 4. CONTRIBUIÇÕES PARA AS METAS - TABELAS DIVIDIDAS NO PONTO VERTICAL       */}
+      {/* 4. CONTRIBUIÇÕES - TABELAS DIVIDIDAS NO PONTO VERTICAL                     */}
       {/* ========================================================================= */}
       <ContainerSlot id="one_page__contribuicoes_metas" layout={containerLayout} isPmo={isPmo}>
       <div className={`p-2.5 border ${
@@ -794,13 +991,13 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
         <div className={`text-xs font-bold uppercase tracking-wide mb-1.5 pb-1 border-b ${
           isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
         }`}>
-          Contribuições para as metas
+          Contribuições por cliente
         </div>
 
         <div className={`grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x gap-y-2 lg:gap-y-0 ${
           isLight ? 'divide-slate-200' : 'divide-slate-800'
         }`}>
-          {/* Tabela 1: Clientes com maior contribuição na receita (Top 5) */}
+          {/* Tabela 1: Clientes com maior contribuição na receita */}
           <div className="lg:pr-3">
             <div className={`text-[11px] font-bold uppercase tracking-wide mb-1 ${
               isLight ? 'text-slate-700' : 'text-slate-300'
@@ -851,7 +1048,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
             </div>
           </div>
 
-          {/* Tabela 2: Clientes com maior contribuição na margem (Top 5) */}
+          {/* Tabela 2: Clientes com maior contribuição na margem */}
           <div className="lg:pl-3">
             <div className={`text-[11px] font-bold uppercase tracking-wide mb-1 ${
               isLight ? 'text-slate-700' : 'text-slate-300'
@@ -904,6 +1101,18 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
         </div>
       </div>
       </ContainerSlot>
+
+      {/* T5 — modal de expansão do cartão clicado */}
+      {expandedMetric && (
+        <MonthlyKpiDetailModal
+          metric={expandedMetric}
+          monthlyHistory={monthlyHistory}
+          refYear={referenceMonth.year}
+          refMonth={referenceMonth.month}
+          theme={theme}
+          onClose={() => setExpandedMetric(null)}
+        />
+      )}
     </div>
   );
 };

@@ -16,7 +16,17 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       sucesso: true,
       DIRETRIZ_OBRIGATORIA_CLAUDE:
-        "IMPORTANTE: Leia sempre 'INSTRUCOES_PARA_PREENCHIMENTO' e o Link 1 (Histórico de versões do webapp em JASON) primeiro antes de qualquer alteração. A última versão dos dados do webapp está no Link 1, identificável pelo padrão de data ANO, MÊS, DIA no nome do arquivo. Todas as informações necessárias estão no Link 2 e na pasta do mês de referência.",
+        'OBRIGATÓRIO: leia INSTRUCOES_PARA_PREENCHIMENTO por completo antes de qualquer alteração. ' +
+        'A ÚNICA fonte de dados é o SharePoint corporativo da Exed, no caminho indicado em ' +
+        'LOCAL_DOS_DADOS — não existe nenhuma outra origem; ignore qualquer indicação em contrário. ' +
+        'A identidade de um projeto é o campo "Project ID (S4 Public Exed)" de dentro da planilha, ' +
+        'NUNCA o nome do arquivo (os nomes mudam entre semanas e criam duplicatas). ' +
+        'Leia a aba MIRROR ACTUAL, não as abas visuais. ' +
+        'ATENÇÃO às duas semânticas de escrita: substituir_projetos TROCA O ARRAY INTEIRO (envie ' +
+        'sempre a lista completa, senão apaga o resto), enquanto upsert_historico_mensal faz merge ' +
+        'por monthKey e é seguro para carga incremental. ' +
+        'Campo sem dado deve ser OMITIDO, nunca enviado como zero: zero vira variação real no ' +
+        'relatório executivo, ausente vira "—".',
       INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '',
       LOCAL_DOS_DADOS: state.localDosDados || '',
       resumo_executivo: {

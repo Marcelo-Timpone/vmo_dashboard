@@ -53,7 +53,7 @@ export const EmptyPagePlaceholder: React.FC<EmptyPagePlaceholderProps> = ({
       {/* Empty Slate Card waiting for user specifications */}
       <div className="flex-1 min-h-[380px] bg-[#0A1C30]/60 border border-[#16385C] p-8 flex flex-col items-center justify-center text-center shadow-[0_4px_20px_rgba(0,0,0,0.3)]">
         <div className="w-14 h-14 bg-[#071626] border border-slate-700 flex items-center justify-center mb-4 text-slate-500 shadow-inner">
-          <Clock size={28} className="text-[#F26522]" />
+          <Clock size={28} className="text-exed-accent" />
         </div>
         <div className="text-sm font-bold text-white uppercase tracking-wider mb-1">
           {title}

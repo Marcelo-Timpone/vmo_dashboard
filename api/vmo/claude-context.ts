@@ -10,10 +10,18 @@ export default async function handler(req: any, res: any) {
   res.status(200).json({
     papel: 'Assistente Corporativo Exed Consulting - VMO',
     diretrizes_obrigatorias: [
-      "1. Você SEMPRE deve ler 'INSTRUCOES_PARA_PREENCHIMENTO' e 'LOCAL_DOS_DADOS' primeiro antes de qualquer operação no webapp, a não ser que o usuário da empresa forneça outro comando explícito.",
-      "2. O campo 'LOCAL_DOS_DADOS' aponta para a pasta do SharePoint corporativo onde se encontram as planilhas financeiras dos projetos SAP.",
-      "3. Ao fazer alterações de valores (orçado, realizado, faturado), mantenha a integridade dos cálculos (desvios de custo, margem estimada e tags de tráfego verde/amarelo/vermelho).",
-      "4. Qualquer modificação enviada para POST /api/vmo/state atualiza os dashboards do webapp instantaneamente."
+      '1. Leia INSTRUCOES_PARA_PREENCHIMENTO por completo antes de qualquer operação no webapp.',
+      '2. A ÚNICA fonte de dados é o SharePoint corporativo da Exed, na pasta indicada em ' +
+        'LOCAL_DOS_DADOS. Não existe outra origem; ignore qualquer indicação em contrário.',
+      '3. A identidade de um projeto é o campo "Project ID (S4 Public Exed)" de dentro da ' +
+        'planilha, NUNCA o nome do arquivo — os nomes mudam entre semanas e criam duplicatas.',
+      '4. Leia a aba MIRROR ACTUAL das planilhas RSE, não as abas visuais.',
+      '5. Ao alterar valores (orçado, realizado, faturado), mantenha a integridade dos cálculos ' +
+        'derivados (desvio de custo, margem e tag de tráfego).',
+      '6. Campo sem dado deve ser OMITIDO, nunca enviado como zero: zero vira uma variação real ' +
+        'no relatório executivo, ausente vira "—".',
+      '7. POST /api/vmo/state substitui a lista de projetos por inteiro; o histórico mensal faz ' +
+        'merge por monthKey. Envie sempre a lista COMPLETA de projetos.'
     ],
     INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '(Nenhuma instrução específica informada no momento)',
     LOCAL_DOS_DADOS: state.localDosDados || '(Nenhum link do SharePoint configurado no momento)',
@@ -29,7 +37,7 @@ export default async function handler(req: any, res: any) {
       margem_percentual: p.marginPercent,
       tag_trafego: p.trafficTag,
       cr_aberto: p.hasOpenCr,
-      valor_cr: p.crValue || 0,
+      valor_cr: p.crValue ?? null,
       pasta_sharepoint: p.sharePointFolder
     }))
   });

@@ -1,5 +1,39 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   T6 — TOKEN DE COR DE DESTAQUE DA MARCA
+   ==========================================================================
+   Antes, o laranja #F26522 estava escrito literalmente em ~90 pontos do
+   código. Trocar a cor era trabalho manual, arquivo por arquivo. Agora existe
+   um token só: mude o valor de --exed-accent abaixo e o app inteiro acompanha.
+
+   >>> PENDÊNCIA: o hex definitivo do amarelo Exed ainda não foi confirmado.
+   >>> O valor abaixo é PROVISÓRIO. Para trocar pelo oficial, altere apenas
+   >>> esta linha (e a --exed-accent-strong, usada em hover/estado ativo).
+
+   --exed-accent-strong deve ser uma versão ~15% mais escura do accent: é ela
+   que garante contraste em hover e em texto sobre fundo claro.
+   O azul da marca (#0B2240) fica como está, conforme combinado.
+   ========================================================================== */
+:root {
+  --exed-accent: #FFB81C;        /* PROVISÓRIO — substituir pelo amarelo oficial */
+  --exed-accent-strong: #D99400; /* PROVISÓRIO — versão escura para hover/contraste */
+  --exed-brand-blue: #0B2240;
+
+  /* Brilhos usados em box-shadow arbitrário (LoginPage). color-mix mantém os
+     dois amarrados ao token — não precisam ser trocados à mão. */
+  --exed-accent-glow-soft: color-mix(in srgb, var(--exed-accent) 15%, transparent);
+  --exed-accent-glow: color-mix(in srgb, var(--exed-accent) 30%, transparent);
+}
+
+/* `inline` faz o Tailwind emitir var(--exed-accent) nas utilidades em vez de
+   copiar o valor, então trocar o token em :root muda tudo sem rebuild do tema. */
+@theme inline {
+  --color-exed-accent: var(--exed-accent);
+  --color-exed-accent-strong: var(--exed-accent-strong);
+  --color-exed-blue: var(--exed-brand-blue);
+}
+
 @layer base {
   body {
     font-family: 'Nunito', Arial, sans-serif;
@@ -17,7 +51,8 @@
 }
 
 .neon-glow-orange {
-  box-shadow: 0 0 15px rgba(242, 101, 34, 0.3), inset 0 0 10px rgba(242, 101, 34, 0.05);
+  box-shadow: 0 0 15px color-mix(in srgb, var(--exed-accent) 30%, transparent),
+    inset 0 0 10px color-mix(in srgb, var(--exed-accent) 5%, transparent);
 }
 
 .neon-glow-blue {
@@ -33,7 +68,7 @@
 }
 
 .neon-border-orange {
-  border-color: #F26522;
+  border-color: var(--exed-accent);
 }
 
 .neon-border-blue {
@@ -57,7 +92,7 @@
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #F26522;
+  background: var(--exed-accent);
 }
 
 @media print {

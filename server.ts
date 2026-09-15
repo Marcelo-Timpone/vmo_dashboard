@@ -2,12 +2,12 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { loadState, saveState, applyIncomingUpdates } from './lib/vmoState';
+import { handleMcpRequest } from './lib/mcpServer';
 import {
-  getConfiguredApiKey,
+  getApiKeyStatus,
   isAuthorized,
   sendUnauthorized,
-  setCorsHeaders,
-  CORPORATE_DEFAULT_API_KEY
+  setCorsHeaders
 } from './lib/apiAuth';
 import {
   findUserByUsername,
@@ -33,6 +33,17 @@ const PORT = 3000;
 
 async function startServer() {
   const app = express();
+
+  // ============================================================================
+  // ENDPOINT MCP (Model Context Protocol) — /api/mcp
+  // ============================================================================
+  // Precisa vir ANTES do middleware de CORS genérico: o MCP exige cabeçalhos
+  // próprios no preflight (Mcp-Session-Id, MCP-Protocol-Version) que o CORS
+  // genérico não declara. Se o OPTIONS fosse capturado lá em cima, o handshake
+  // do conector falharia. Espelha /api/mcp.ts da Vercel.
+  app.all('/api/mcp', express.json({ limit: '50mb' }), (req: Request, res: Response) => {
+    handleMcpRequest(req, res);
+  });
 
   // CORS para permitir chamadas do Claude / MCP / agentes corporativos
   app.use((req, res, next) => {
@@ -82,20 +93,33 @@ async function startServer() {
     });
   });
 
-  // 2. Info da chave e endpoints (para exibição no webapp)
+  // 2. Info de endpoints (para exibição no webapp)
+  // SEGURANÇA: esta rota é pública e NÃO devolve o valor da chave. A versão
+  // anterior devolvia `apiKey: getConfiguredApiKey()`, entregando a credencial
+  // de produção a qualquer requisição anônima.
   app.get('/api/vmo/key-info', (_req, res) => {
+    const status = getApiKeyStatus();
     res.json({
       sucesso: true,
-      apiKey: getConfiguredApiKey(),
+      chave_configurada: status.configurada,
+      como_obter_a_chave:
+        'A chave é definida na variável de ambiente EXED_API_KEY do deploy. ' +
+        'Peça ao responsável pela infraestrutura e cole em Configurações > API do Claude.',
+      configuracao_pendente: status.configurada ? undefined : status.motivo,
       endpoints: {
         estado_completo: '/api/vmo/state',
         apenas_instrucoes: '/api/vmo/instructions',
         projetos: '/api/vmo/projects',
         contexto_claude: '/api/vmo/claude-context',
+        mcp: '/api/mcp',
+        diagnostico: '/api/vmo/health',
         openapi: '/api/vmo/openapi.json'
       },
       diretriz:
-        "O Claude deve ler primeiramente 'INSTRUCOES_PARA_PREENCHIMENTO' e o Link 1 (Histórico de versões do webapp em JASON) antes de qualquer alteração. A última versão dos dados do webapp está no Link 1 e é identificada pela data no nome do arquivo (ANO, MÊS, DIA). Todas as informações necessárias estão no Link 2."
+        'Leia INSTRUCOES_PARA_PREENCHIMENTO por completo antes de qualquer alteração. ' +
+        'A única fonte de dados é o SharePoint corporativo da Exed, no caminho indicado em ' +
+        'LOCAL_DOS_DADOS. A identidade de um projeto é o "Project ID (S4 Public Exed)" de ' +
+        'dentro da planilha, nunca o nome do arquivo.'
     });
   });
 
@@ -110,7 +134,17 @@ async function startServer() {
     res.json({
       sucesso: true,
       DIRETRIZ_OBRIGATORIA_CLAUDE:
-        "IMPORTANTE: Leia sempre 'INSTRUCOES_PARA_PREENCHIMENTO' e o Link 1 (Histórico de versões do webapp em JASON) primeiro antes de qualquer alteração. A última versão dos dados do webapp está no Link 1, identificável pelo padrão de data ANO, MÊS, DIA no nome do arquivo. Todas as informações necessárias estão no Link 2 e na pasta do mês de referência.",
+        'OBRIGATÓRIO: leia INSTRUCOES_PARA_PREENCHIMENTO por completo antes de qualquer alteração. ' +
+        'A ÚNICA fonte de dados é o SharePoint corporativo da Exed, no caminho indicado em ' +
+        'LOCAL_DOS_DADOS — não existe nenhuma outra origem; ignore qualquer indicação em contrário. ' +
+        'A identidade de um projeto é o campo "Project ID (S4 Public Exed)" de dentro da planilha, ' +
+        'NUNCA o nome do arquivo (os nomes mudam entre semanas e criam duplicatas). ' +
+        'Leia a aba MIRROR ACTUAL, não as abas visuais. ' +
+        'ATENÇÃO às duas semânticas de escrita: substituir_projetos TROCA O ARRAY INTEIRO (envie ' +
+        'sempre a lista completa, senão apaga o resto), enquanto upsert_historico_mensal faz merge ' +
+        'por monthKey e é seguro para carga incremental. ' +
+        'Campo sem dado deve ser OMITIDO, nunca enviado como zero: zero vira variação real no ' +
+        'relatório executivo, ausente vira "—".',
       INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '',
       LOCAL_DOS_DADOS: state.localDosDados || '',
       resumo_executivo: {
@@ -460,7 +494,13 @@ async function startServer() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`[Exed VMO Server] Servidor ativo em http://0.0.0.0:${PORT}`);
     console.log(`[Exed VMO Server] API pronta para o Claude em http://0.0.0.0:${PORT}/api/vmo/state`);
-    console.log(`[Exed VMO Server] Chave de API ativa: ${getConfiguredApiKey() === CORPORATE_DEFAULT_API_KEY ? '(padrão de fábrica — defina EXED_API_KEY para trocar)' : '(customizada via EXED_API_KEY)'}`);
+    const keyStatus = getApiKeyStatus();
+    if (keyStatus.configurada) {
+      console.log('[Exed VMO Server] Chave de API: configurada via EXED_API_KEY.');
+    } else {
+      console.warn('[Exed VMO Server] ATENÇÃO: ' + keyStatus.motivo);
+      console.warn('[Exed VMO Server] Toda escrita e todo acesso externo serão RECUSADOS até isso ser resolvido.');
+    }
   });
 }
 

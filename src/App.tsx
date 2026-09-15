@@ -185,26 +185,17 @@ export default function App() {
     return '';
   });
 
-  // App theme state: 'neon' | 'dark-solid' | 'light'
-  const [theme, setTheme] = useState<AppTheme>(() => {
-    try {
-      const saved = localStorage.getItem('vmo_exed_theme');
-      if (saved && (saved === 'neon' || saved === 'dark-solid' || saved === 'light')) {
-        return saved as AppTheme;
-      }
-    } catch {
-      // ignore
-    }
-    return 'neon';
-  });
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('vmo_exed_theme', theme);
-    } catch {
-      // ignore
-    }
-  }, [theme]);
+  // ---------------------------------------------------------------------------
+  // T9 — TEMA FIXO EM 'neon'
+  // O seletor de temas saiu da interface. O tipo AppTheme e as ramificações
+  // `isLight` espalhadas pelos componentes continuam no código de propósito:
+  // são 41 pontos de decisão e arrancar todos agora seria risco de regressão
+  // visual sem ganho nenhum. Ficam marcados como CÓDIGO MORTO e a limpeza
+  // completa fica para depois da validação da equipe.
+  //
+  // Enquanto `theme` for a constante abaixo, todo `isLight` avalia false.
+  // ---------------------------------------------------------------------------
+  const theme: AppTheme = 'neon';
 
   // Local persistence sync
   useEffect(() => {
@@ -424,8 +415,9 @@ export default function App() {
       className={`${
         isDashboardTab ? 'h-screen overflow-hidden' : 'min-h-screen'
       } flex flex-col ${
+        // CÓDIGO MORTO (T9): theme é fixo em 'neon', então este ramo nunca roda.
         theme === 'light' ? 'bg-[#F8FAFC] text-slate-900' : 'bg-[#06121E] text-slate-100'
-      } selection:bg-[#F26522] selection:text-white`}
+      } selection:bg-exed-accent selection:text-white`}
     >
       {/* Header with official Exed logo, reference month, and role-based tabs */}
       <Header
@@ -435,7 +427,6 @@ export default function App() {
         referencePeriod={referencePeriod}
         onLogout={handleLogout}
         theme={theme}
-        onThemeChange={setTheme}
       />
 
       {/* Main Content Area */}
@@ -474,7 +465,6 @@ export default function App() {
             onUpdateClients={setClients}
             onRestoreDefaults={handleRestoreDefaults}
             theme={theme}
-            onThemeChange={setTheme}
             localDosDados={localDosDados}
             onUpdateLocalDosDados={setLocalDosDados}
             session={session}

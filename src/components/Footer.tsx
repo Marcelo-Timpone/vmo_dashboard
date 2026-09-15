@@ -14,7 +14,7 @@ export const Footer: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-4 text-slate-400">
-          <span className="text-[#F26522] font-semibold text-[11px]">Exed Consulting © 2026</span>
+          <span className="text-exed-accent font-semibold text-[11px]">Exed Consulting © 2026</span>
         </div>
       </div>
     </footer>

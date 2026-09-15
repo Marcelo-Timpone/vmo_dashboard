@@ -1,10 +1,19 @@
 import React, { useState, useMemo } from 'react';
 import { Maximize2, Minimize2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { ContainerSlot } from './ContainerSlot';
+import { MoMBadge, MoMEmpty } from './MoMBadge';
+import {
+  computeDelta,
+  computeProjectVariance,
+  formatDeltaPercent,
+  formatDeltaAbs,
+  formatDeltaPp,
+  latestHistoryMonth
+} from '../utils/monthlyComparison';
 
 interface GeneralInfoDashboardProps {
   projects: SapProjectFinancial[];
@@ -13,6 +22,7 @@ interface GeneralInfoDashboardProps {
   containerSettings?: ContainerParamSettings;
   containerLayout?: ContainerLayoutConfig[];
   isPmo?: boolean;
+  monthlyHistory?: MonthlyKpiSnapshot[];
 }
 
 export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
@@ -21,7 +31,8 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
   theme = 'neon',
   containerSettings,
   containerLayout,
-  isPmo = false
+  isPmo = false,
+  monthlyHistory = []
 }) => {
   // State for expanding/reducing any of the 4 containers to full screen
   const [expandedContainer, setExpandedContainer] = useState<1 | 2 | 3 | 4 | null>(null);
@@ -51,13 +62,11 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
       .join('');
   };
 
-  // 1. "Projetos com maior uso de orçamento" - sorted by budgetRealized / planned descending
+  // 1. "Projetos com maior uso de orçamento" — ordenado por orçamento realizado.
+  // O multiplicador mágico `totalResources * 80000` que existia aqui foi removido:
+  // era uma estimativa inventada de custo por recurso, não um dado da RSE.
   const resourcesProjects = useMemo(() => {
-    return [...filteredProjects].sort((a, b) => {
-      const valB = b.budgetRealized || (b.totalResources ? b.totalResources * 80000 : 0);
-      const valA = a.budgetRealized || (a.totalResources ? a.totalResources * 80000 : 0);
-      return valB - valA;
-    });
+    return [...filteredProjects].sort((a, b) => (b.budgetRealized || 0) - (a.budgetRealized || 0));
   }, [filteredProjects]);
 
   // 2. "CRs em aberto" - projects with hasOpenCr === true or defined crDescription
@@ -86,12 +95,36 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
       .sort((a, b) => (b.npsScore || 0) - (a.npsScore || 0));
   }, [filteredProjects]);
 
+  // ---------------------------------------------------------------------------
+  // COMPARATIVOS MÊS A MÊS (calculados, não digitados)
+  // O histórico é agregado do portfólio inteiro, então sob filtro de frente os
+  // comparativos são suprimidos: comparar um recorte filtrado contra uma base
+  // não filtrada daria um número errado.
+  // ---------------------------------------------------------------------------
+  const isPortfolioWide = selectedFilters.includes('TODOS') || selectedFilters.length === 0;
+  const refMonth = useMemo(() => latestHistoryMonth(monthlyHistory), [monthlyHistory]);
+
+  const deltaFor = (metric: Parameters<typeof computeDelta>[1]) =>
+    isPortfolioWide && refMonth
+      ? computeDelta(monthlyHistory, metric, refMonth.year, refMonth.month)
+      : null;
+
+  const spendDelta = deltaFor('totalSpend');
+  const reimbursableDelta = deltaFor('reimbursableTotal');
+  const crCountDelta = deltaFor('openCrCount');
+  const crValueDelta = deltaFor('openCrValue');
+  const almDelta = deltaFor('almAdoptionPercent');
+  const npsDelta = deltaFor('npsAvg');
+
   // Helper for toggle
   const toggleExpand = (containerId: 1 | 2 | 3 | 4) => {
     setExpandedContainer(prev => (prev === containerId ? null : containerId));
   };
 
+  const isBudgetExpanded = expandedContainer === 1;
+
   // Card theme classes
+  // CÓDIGO MORTO (T9): o app é fixo em tema Neon, então isLight é sempre false.
   const isLight = theme === 'light';
   const cardBg = isLight ? 'bg-white border-slate-200 text-slate-900 shadow-sm' : 'bg-[#0A1C30] border-[#16385C] text-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.3)]';
   const innerCardBg = isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#071626] border-[#1E436E]';
@@ -117,34 +150,72 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                 <span className="text-xs font-bold uppercase tracking-wide">
                   Projetos com maior uso de orçamento
                 </span>
-                <span className={`text-[10px] font-semibold ${textMuted}`}>
-                  {filteredProjects.length} projetos monitorados
-                </span>
+                <div className="flex items-center gap-2">
+                  {spendDelta
+                    ? <MoMBadge
+                        delta={spendDelta}
+                        text={formatDeltaPercent(spendDelta)}
+                        higherIsBetter={false}
+                        theme={theme}
+                        suffix="gasto vs mês ant."
+                      />
+                    : isPortfolioWide && <MoMEmpty theme={theme} />}
+                  <span className={`text-[10px] font-semibold ${textMuted}`}>
+                    {filteredProjects.length} projetos monitorados
+                  </span>
+                </div>
               </div>
 
               {/* Table */}
               <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
+                    {/* T10 — títulos completos só na versão expandida; encolhidos,
+                        a tabela cabe sem rolagem horizontal. */}
                     <tr className={`border-b ${headerBorder} text-[10px] font-bold ${textMuted} uppercase`}>
-                      <th className="py-1 px-2">Cliente & Frente</th>
+                      <th className={`py-1 px-2 ${isBudgetExpanded ? '' : 'w-[26%]'}`}>Cliente & Frente</th>
                       <th className="py-1 px-2 text-center">Encerramento</th>
                       <th className="py-1 px-2 text-right">Total Orçamento</th>
                       <th className="py-1 px-2 text-right">Restante</th>
-                      <th className="py-1 px-2 text-right">Total do gasto reembolsável</th>
-                      <th className="py-1 px-2 text-right">Comparativo Mês Ant.</th>
+                      <th className="py-1 px-2 text-right">
+                        {isBudgetExpanded ? 'Total do gasto reembolsável' : 'Reembolsável'}
+                      </th>
+                      <th className="py-1 px-2 text-right">
+                        {isBudgetExpanded ? 'Comparativo Mês Ant.' : 'Variação'}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className={`divide-y ${tableBorder}`}>
                     {resourcesProjects.map(p => {
-                      const variance = p.resourceVariancePercent || 0;
-                      // Se o uso de orçamento comparado ao mês anterior reduziu/economizou (<= 0), verde; se aumentou (> 0), vermelho
-                      const isFavorable = variance <= 0;
-                      const realizedBudget = p.budgetRealized || (p.totalResources ? p.totalResources * 80000 : 1000000);
-                      const remainingBudget = p.budgetPlanned && p.budgetPlanned > realizedBudget 
-                        ? p.budgetPlanned - realizedBudget 
-                        : (p.remainingResources ? p.remainingResources * 40000 : 150000);
-                      const reimbursable = p.reimbursableExpenseTotal ?? 35000;
+                      // Prioridade: histórico por projeto (calculado) > campo
+                      // digitado pelo PMO (manual) > nada. Ver computeProjectVariance.
+                      const varianceResult = refMonth
+                        ? computeProjectVariance(
+                            monthlyHistory,
+                            p.id,
+                            'budgetRealized',
+                            refMonth.year,
+                            refMonth.month,
+                            p.resourceVariancePercent
+                          )
+                        : (typeof p.resourceVariancePercent === 'number' && p.resourceVariancePercent !== 0
+                            ? { percent: p.resourceVariancePercent, source: 'manual' as const }
+                            : null);
+                      // Gasto que cai (<= 0) é favorável; que sobe é desfavorável.
+                      const isFavorable = (varianceResult?.percent ?? 0) <= 0;
+                      // Sem invenção: quando o campo não veio da RSE, a célula
+                      // mostra "—". Antes havia defaults de R$ 1.000.000,
+                      // R$ 150.000 e R$ 35.000 escritos no código, que apareciam
+                      // como se fossem números reais do projeto.
+                      const realizedBudget = typeof p.budgetRealized === 'number' ? p.budgetRealized : null;
+                      const remainingBudget =
+                        typeof p.remainingResources === 'number'
+                          ? p.remainingResources
+                          : typeof p.budgetPlanned === 'number' && realizedBudget !== null
+                          ? p.budgetPlanned - realizedBudget
+                          : null;
+                      const reimbursable =
+                        typeof p.reimbursableExpenseTotal === 'number' ? p.reimbursableExpenseTotal : null;
 
                       return (
                         <tr key={p.id} className={`${rowHover} transition-colors`}>
@@ -170,35 +241,55 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
 
                           {/* Coluna 2: Data de encerramento planejada */}
                           <td className={`py-1.5 px-2 text-center font-mono text-[11px] ${textMuted} whitespace-nowrap`}>
-                            {p.plannedEndDate || '31/12/2026'}
+                            {p.plannedEndDate || '—'}
                           </td>
 
                           {/* Coluna 3: Total do orçamento realizado */}
                           <td className="py-1.5 px-2 text-right font-bold font-mono text-[11px] whitespace-nowrap" style={{ color: isLight ? '#0F172A' : '#FFFFFF' }}>
-                            {formatCurrencyBRL(realizedBudget)}
+                            {realizedBudget !== null ? formatCurrencyBRL(realizedBudget) : '—'}
                           </td>
 
                           {/* Coluna 4: Orçamento restante */}
                           <td className={`py-1.5 px-2 text-right font-mono text-[11px] ${textMuted} whitespace-nowrap`}>
-                            {formatCurrencyBRL(remainingBudget)}
+                            {remainingBudget !== null ? formatCurrencyBRL(remainingBudget) : '—'}
                           </td>
 
                           {/* Coluna 5: Total do gasto reembolsável */}
-                          <td className="py-1.5 px-2 text-right font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
-                            {formatCurrencyBRL(reimbursable)}
+                          <td className="py-1.5 px-2 text-right font-mono text-[11px] font-semibold text-emerald-600 whitespace-nowrap">
+                            {reimbursable !== null ? formatCurrencyBRL(reimbursable) : '—'}
                           </td>
 
-                          {/* Coluna 6: Comparativo com mês anterior (% em verde ou vermelho) */}
+                          {/* Coluna 6: Comparativo com mês anterior — CALCULADO
+                              quando há histórico por projeto. Sem base, "—":
+                              nunca 0,0% fingindo estabilidade. */}
                           <td className="py-1.5 px-2 text-right whitespace-nowrap">
-                            <span
-                              className={`text-[10px] font-bold font-mono px-1.5 py-0.5 border ${
-                                isFavorable
-                                  ? 'text-[#00FF88] bg-[#00FF88]/10 border-[#00FF88]/30'
-                                  : 'text-[#FF3366] bg-[#FF3366]/10 border-[#FF3366]/30'
-                              }`}
-                            >
-                              {variance > 0 ? `+${variance.toFixed(1)}%` : `${variance.toFixed(1)}%`}
-                            </span>
+                            {varianceResult ? (
+                              <span
+                                className={`text-[10px] font-bold font-mono px-1.5 py-0.5 border ${
+                                  isFavorable
+                                    ? 'text-[#00FF88] bg-[#00FF88]/10 border-[#00FF88]/30'
+                                    : 'text-[#FF3366] bg-[#FF3366]/10 border-[#FF3366]/30'
+                                }`}
+                                title={
+                                  varianceResult.source === 'calculado'
+                                    ? 'Calculado a partir do histórico mensal deste projeto.'
+                                    : 'Valor digitado manualmente em Configurações → Projetos. Ainda não há histórico por projeto para calcular.'
+                                }
+                              >
+                                {varianceResult.percent > 0 ? '+' : ''}
+                                {varianceResult.percent.toFixed(1)}%
+                                {varianceResult.source === 'manual' && (
+                                  <span className="ml-0.5 font-normal opacity-70">m</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span
+                                className={`text-[10px] ${textMuted}`}
+                                title="Sem histórico do mês anterior para este projeto."
+                              >
+                                —
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -249,9 +340,29 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                 <span className="text-xs font-bold uppercase tracking-wide">
                   CRs em aberto
                 </span>
-                <span className="text-[10px] font-bold text-[#F26522] bg-[#F26522]/10 px-1.5 py-0.5 border border-[#F26522]/30">
-                  {crProjects.length} solicitações ativas
-                </span>
+                <div className="flex items-center gap-2">
+                  {crValueDelta
+                    ? <MoMBadge
+                        delta={crValueDelta}
+                        text={formatDeltaPercent(crValueDelta)}
+                        higherIsBetter={false}
+                        theme={theme}
+                        suffix="em valor"
+                      />
+                    : isPortfolioWide && <MoMEmpty theme={theme} />}
+                  {crCountDelta
+                    ? <MoMBadge
+                        delta={crCountDelta}
+                        text={formatDeltaAbs(crCountDelta)}
+                        higherIsBetter={false}
+                        theme={theme}
+                        suffix="CRs"
+                      />
+                    : null}
+                  <span className="text-[10px] font-bold text-exed-accent bg-exed-accent/10 px-1.5 py-0.5 border border-exed-accent/30">
+                    {crProjects.length} solicitações ativas
+                  </span>
+                </div>
               </div>
 
               {/* Table */}
@@ -267,7 +378,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                   </thead>
                   <tbody className={`divide-y ${tableBorder}`}>
                     {crProjects.map(p => {
-                      const crVal = p.crValue || 125000;
+                      const crVal = p.crValue;
                       return (
                         <tr key={p.id} className={`${rowHover} transition-colors`}>
                           {/* Logo + Nome do cliente, na mesma coluna abaixo a frente de projeto */}
@@ -291,19 +402,19 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                           </td>
 
                           {/* Valor da CR (logo antes da coluna de data de abertura) */}
-                          <td className="py-1.5 px-2 text-right font-mono font-bold text-[11px] text-[#F26522] whitespace-nowrap">
-                            {formatCurrencyBRL(crVal)}
+                          <td className="py-1.5 px-2 text-right font-mono font-bold text-[11px] text-exed-accent whitespace-nowrap">
+                            {typeof crVal === 'number' ? formatCurrencyBRL(crVal) : '—'}
                           </td>
 
                           {/* Data de abertura */}
                           <td className={`py-1.5 px-2 text-center font-mono text-[11px] ${textMuted} whitespace-nowrap`}>
-                            {p.crOpenDate || '10/08/2026'}
+                            {p.crOpenDate || '—'}
                           </td>
 
                           {/* Descrição da CR */}
                           <td className="py-1.5 px-2 text-[11px]" style={{ color: isLight ? '#334155' : '#E2E8F0' }}>
                             <span className="line-clamp-2">
-                              {p.crDescription || 'Adequação de escopo técnico e cronograma de homologação.'}
+                              {p.crDescription || '—'}
                             </span>
                           </td>
                         </tr>
@@ -356,9 +467,14 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                 <span className="text-xs font-bold uppercase tracking-wide">
                   Uso de ALM
                 </span>
-                <span className={`text-[10px] font-semibold ${textMuted}`}>
-                  {almUsingProjects.length} com ALM / {almNotUsingProjects.length} sem ALM
-                </span>
+                <div className="flex items-center gap-2">
+                  {almDelta
+                    ? <MoMBadge delta={almDelta} text={formatDeltaPp(almDelta)} theme={theme} />
+                    : isPortfolioWide && <MoMEmpty theme={theme} />}
+                  <span className={`text-[10px] font-semibold ${textMuted}`}>
+                    {almUsingProjects.length} com ALM / {almNotUsingProjects.length} sem ALM
+                  </span>
+                </div>
               </div>
 
               {/* Layout: 25% Donut + 75% Tabela */}
@@ -539,24 +655,24 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
             <div>
               {/* Header */}
               <div className={`flex items-center justify-between gap-2 mb-2 pb-1.5 border-b ${headerBorder}`}>
+                <span className="text-xs font-bold uppercase tracking-wide">
+                  Avaliações
+                </span>
+                {/* T7 — o valor da meta de NPS saiu da interface; o que fica é o
+                    número real e a variação contra o mês anterior. */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wide">
-                    Avaliações
-                  </span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 border ${
-                    isLight
-                      ? 'bg-slate-100 text-slate-700 border-slate-300'
-                      : 'bg-[#071626] text-[#00D2FF] border-[#00D2FF]/30'
-                  }`}>
-                    Meta NPS: {containerSettings?.npsTargetScore ?? 8.5}
+                  {npsDelta
+                    ? <MoMBadge delta={npsDelta} text={formatDeltaPp(npsDelta)} theme={theme} />
+                    : isPortfolioWide && <MoMEmpty theme={theme} />}
+                  <span className={`text-[10px] font-semibold ${textMuted}`}>
+                    NPS Médio:{' '}
+                    <strong className="text-[#00FF88]">
+                      {npsProjects.length > 0
+                        ? (npsProjects.reduce((acc, p) => acc + (p.npsScore || 0), 0) / npsProjects.length).toFixed(1)
+                        : '—'}
+                    </strong>
                   </span>
                 </div>
-                <span className={`text-[10px] font-semibold ${textMuted}`}>
-                  NPS Médio:{' '}
-                  <strong className="text-[#00FF88]">
-                    {(npsProjects.reduce((acc, p) => acc + (p.npsScore || 0), 0) / (npsProjects.length || 1)).toFixed(1)}
-                  </strong>
-                </span>
               </div>
 
               {/* Table */}
@@ -571,7 +687,9 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                   </thead>
                   <tbody className={`divide-y ${tableBorder}`}>
                     {npsProjects.map(p => {
-                      const score = p.npsScore ?? 9.0;
+                      // npsProjects já filtra por npsScore !== undefined, então
+                      // aqui o valor sempre existe — sem default inventado.
+                      const score = p.npsScore as number;
                       const npsTarget = containerSettings?.npsTargetScore ?? 8.5;
                       // Color code: >= target Promotor; >= 7.0 Neutro; < 7.0 Detrator
                       const isPromoter = score >= npsTarget;
@@ -601,7 +719,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
 
                           {/* Data da realização do NPS */}
                           <td className={`py-1.5 px-2 text-center font-mono text-[11px] ${textMuted}`}>
-                            {p.npsDate || '25/08/2026'}
+                            {p.npsDate || '—'}
                           </td>
 
                           {/* Nota do NPS */}

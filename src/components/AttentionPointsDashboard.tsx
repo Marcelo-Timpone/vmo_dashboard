@@ -1,9 +1,16 @@
 import React, { useMemo } from 'react';
-import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
 import { ClientLogo } from './ClientLogo';
 import { ContainerSlot } from './ContainerSlot';
+import { MoMBadge, MoMEmpty } from './MoMBadge';
+import {
+  computeDelta,
+  formatDeltaPp,
+  formatDeltaAbs,
+  latestHistoryMonth
+} from '../utils/monthlyComparison';
 
 interface AttentionPointsDashboardProps {
   projects: SapProjectFinancial[];
@@ -12,6 +19,7 @@ interface AttentionPointsDashboardProps {
   containerSettings?: ContainerParamSettings;
   containerLayout?: ContainerLayoutConfig[];
   isPmo?: boolean;
+  monthlyHistory?: MonthlyKpiSnapshot[];
 }
 
 export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> = ({
@@ -20,10 +28,16 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
   theme = 'neon',
   containerSettings,
   containerLayout,
-  isPmo = false
+  isPmo = false,
+  monthlyHistory = []
 }) => {
+  // CÓDIGO MORTO (T9): o app é fixo em tema Neon, então isLight é sempre false.
   const isLight = theme === 'light';
-  const marginTarget = containerSettings?.contractMarginTarget ?? 24.0;
+  // T7 — metas opcionais. Sem meta configurada, não há "abaixo da meta":
+  // a detração de margem passa a ser medida contra a média do próprio portfólio.
+  const rawMarginTarget = containerSettings?.contractMarginTarget;
+  const hasMarginTarget =
+    typeof rawMarginTarget === 'number' && Number.isFinite(rawMarginTarget) && rawMarginTarget > 0;
   const governanceThreshold = containerSettings?.governanceComplianceThreshold ?? 80.0;
 
   // Filter projects by selected SAP solutions
@@ -61,12 +75,21 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
       .slice(0, 3);
   }, [filteredProjects]);
 
+  const portfolioAvgMargin = useMemo(() => {
+    if (filteredProjects.length === 0) return null;
+    return filteredProjects.reduce((acc, p) => acc + p.marginPercent, 0) / filteredProjects.length;
+  }, [filteredProjects]);
+
+  // Referência de detração: a meta quando existe, senão a média do portfólio.
+  const marginBaseline = hasMarginTarget ? (rawMarginTarget as number) : portfolioAvgMargin;
+
   const detractorMargin = useMemo(() => {
+    if (marginBaseline === null) return [];
     return filteredProjects
-      .filter(p => p.marginPercent < marginTarget)
+      .filter(p => p.marginPercent < marginBaseline)
       .sort((a, b) => a.marginPercent - b.marginPercent)
       .slice(0, 3);
-  }, [filteredProjects, marginTarget]);
+  }, [filteredProjects, marginBaseline]);
 
   // --------------------------------------------------------------------------
   // 2. ADERÊNCIA AOS CRONOGRAMAS E ATRASOS
@@ -79,19 +102,24 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
       .sort((a, b) => (b.scheduleDelayPercent || 0) - (a.scheduleDelayPercent || 0));
   }, [filteredProjects]);
 
-  // Average schedule adherence: 100 - average delay (clamped between 94.0 and 100.0)
+  // Aderência média = 100 - atraso médio. Sem projetos, não há aderência:
+  // o 98,5% que ficava aqui era um número inventado para o gráfico não ficar
+  // vazio. O piso da escala continua sendo só a escala do gráfico.
   const averageAdherence = useMemo(() => {
-    if (filteredProjects.length === 0) return 98.5;
+    if (filteredProjects.length === 0) return null;
     const totalDelay = filteredProjects.reduce((acc, p) => acc + (p.scheduleDelayPercent || 0), 0);
-    const avgDelay = totalDelay / filteredProjects.length;
-    const adherence = 100.0 - avgDelay;
-    return Math.max(94.0, Math.min(100.0, adherence));
+    return 100.0 - totalDelay / filteredProjects.length;
   }, [filteredProjects]);
+
+  const gaugeMin = containerSettings?.gaugeMinScale ?? 94.0;
 
   // Arc length and filled progress calculation:
   // Semi-circular arc radius R = 55, arc length = pi * 55 ≈ 172.8
   const ARC_LENGTH = 172.8;
-  const progressRatio = Math.max(0, Math.min(1, (averageAdherence - 94.0) / (100.0 - 94.0)));
+  const progressRatio =
+    averageAdherence === null
+      ? 0
+      : Math.max(0, Math.min(1, (averageAdherence - gaugeMin) / (100.0 - gaugeMin)));
   const strokeOffset = ARC_LENGTH * (1 - progressRatio);
 
   // --------------------------------------------------------------------------
@@ -99,17 +127,35 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
   // --------------------------------------------------------------------------
   const documentationList = useMemo(() => {
     return filteredProjects.map(p => {
-      const pct = p.signedDocumentsPercent ?? 85;
+      // Sem default de 85%: projeto sem o dado aparece com a barra vazia e um
+      // rótulo "sem dado", em vez de uma barra quase cheia que ninguém mediu.
+      const pct = typeof p.signedDocumentsPercent === 'number' ? p.signedDocumentsPercent : null;
       return {
         id: p.id,
         client: p.client,
         clientLogo: p.clientLogo,
         solution: p.solution,
-        isLegacy: false,
+        isLegacy: !!p.isLegacyDocs,
         pct
       };
     });
   }, [filteredProjects]);
+
+  // ---------------------------------------------------------------------------
+  // COMPARATIVOS MÊS A MÊS
+  // O histórico é agregado do portfólio, então sob filtro de frente ficam ocultos.
+  // ---------------------------------------------------------------------------
+  const isPortfolioWide = selectedFilters.includes('TODOS') || selectedFilters.length === 0;
+  const refMonth = useMemo(() => latestHistoryMonth(monthlyHistory), [monthlyHistory]);
+
+  const deltaFor = (metric: Parameters<typeof computeDelta>[1]) =>
+    isPortfolioWide && refMonth
+      ? computeDelta(monthlyHistory, metric, refMonth.year, refMonth.month)
+      : null;
+
+  const delayDelta = deltaFor('avgScheduleDelay');
+  const docsDelta = deltaFor('signedDocsAvg');
+  const detractorDelta = deltaFor('detractorCount');
 
   return (
     <div className={`w-full flex flex-col gap-2 max-w-[1600px] mx-auto ${
@@ -124,10 +170,19 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
           ? 'bg-white border-slate-200 shadow-sm'
           : 'bg-[#0A1C30] border-[#16385C] shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
       }`}>
-        <div className={`text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
+        <div className={`flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
           isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
         }`}>
-          Projetos detratores
+          <span>Projetos detratores</span>
+          {detractorDelta
+            ? <MoMBadge
+                delta={detractorDelta}
+                text={formatDeltaAbs(detractorDelta)}
+                higherIsBetter={false}
+                theme={theme}
+                suffix="detratores vs mês ant."
+              />
+            : isPortfolioWide && <MoMEmpty theme={theme} />}
         </div>
 
         <div className={`grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x gap-y-2 lg:gap-y-0 ${
@@ -209,7 +264,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                   ? 'bg-slate-50 border-slate-200 text-slate-500'
                   : 'bg-[#071626] border-slate-800 text-slate-400'
               }`}>
-                Nenhum cliente abaixo da meta de margem ({marginTarget.toFixed(1)}%) no período selecionado.
+                Nenhum cliente abaixo da referência de margem no período selecionado.
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -270,10 +325,20 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
           ? 'bg-white border-slate-200 shadow-sm'
           : 'bg-[#0A1C30] border-[#16385C] shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
       }`}>
-        <div className={`text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
+        <div className={`flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
           isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
         }`}>
-          Aderência aos cronogramas e atrasos
+          <span>Aderência aos cronogramas e atrasos</span>
+          {/* Atraso médio subindo é ruim — daí higherIsBetter=false. */}
+          {delayDelta
+            ? <MoMBadge
+                delta={delayDelta}
+                text={formatDeltaPp(delayDelta)}
+                higherIsBetter={false}
+                theme={theme}
+                suffix="de atraso vs mês ant."
+              />
+            : isPortfolioWide && <MoMEmpty theme={theme} />}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 items-stretch">
@@ -332,7 +397,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                   fontWeight="900"
                   fontFamily="system-ui, sans-serif"
                 >
-                  {averageAdherence.toFixed(1)}%
+                  {averageAdherence !== null ? `${averageAdherence.toFixed(1)}%` : '—'}
                 </text>
                 <text
                   x="80"
@@ -356,7 +421,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                   fontWeight="bold"
                   fontFamily="monospace"
                 >
-                  94%
+                  {gaugeMin.toFixed(0)}%
                 </text>
                 <text
                   x="135"
@@ -462,25 +527,24 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
           isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
         }`}>
           <span>Documentação registrada ao PMO e assinada</span>
-          <span className={`text-[10px] font-mono px-2 py-0.5 border ${
-            isLight
-              ? 'bg-slate-100 text-slate-700 border-slate-300'
-              : 'bg-[#071626] text-[#00D2FF] border-[#00D2FF]/30'
-          }`}>
-            Meta: {governanceThreshold.toFixed(0)}%
-          </span>
+          {/* T7 — o valor do limite saiu da interface; a cor das barras continua
+              usando esse limite internamente. */}
+          {docsDelta
+            ? <MoMBadge delta={docsDelta} text={formatDeltaPp(docsDelta)} theme={theme} />
+            : isPortfolioWide && <MoMEmpty theme={theme} />}
         </div>
 
         {/* Horizontal bars grid */}
         <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
           {documentationList.map(item => {
+            const hasPct = item.pct !== null;
             let barColor = 'bg-[#00FF88]';
             let textColor = isLight ? 'text-emerald-700' : 'text-[#00FF88]';
 
-            if (item.pct < governanceThreshold - 10) {
+            if (hasPct && (item.pct as number) < governanceThreshold - 10) {
               barColor = 'bg-[#FF3366]';
               textColor = isLight ? 'text-red-600' : 'text-[#FF3366]';
-            } else if (item.pct < governanceThreshold) {
+            } else if (hasPct && (item.pct as number) < governanceThreshold) {
               barColor = 'bg-[#EAB308]';
               textColor = isLight ? 'text-amber-600' : 'text-[#EAB308]';
             }
@@ -516,13 +580,21 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
 
                 {/* Bar or Legacy Text */}
                 <div className="col-span-8 sm:col-span-9 flex items-center gap-2">
-                  {item.isLegacy ? (
+                  {!hasPct ? (
                     <span className={`text-[10px] font-semibold italic px-2 py-0.5 border ${
                       isLight
                         ? 'bg-slate-100 text-slate-500 border-slate-200'
                         : 'bg-[#071626] text-slate-400 border-slate-700/60'
                     }`}>
-                      Dados antigos não incluídos, controle interno agendado
+                      Sem dado de documentação na RSE
+                    </span>
+                  ) : item.isLegacy ? (
+                    <span className={`text-[10px] font-semibold italic px-2 py-0.5 border ${
+                      isLight
+                        ? 'bg-slate-100 text-slate-500 border-slate-200'
+                        : 'bg-[#071626] text-slate-400 border-slate-700/60'
+                    }`}>
+                      {containerSettings?.legacyNoticeText || 'Dados antigos não incluídos, controle interno agendado'}
                     </span>
                   ) : (
                     <>
@@ -530,7 +602,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                         isLight ? 'bg-slate-100 border-slate-200' : 'bg-[#071626] border-slate-800'
                       }`}>
                         <div
-                          style={{ width: `${Math.min(100, Math.max(0, item.pct))}%` }}
+                          style={{ width: `${Math.min(100, Math.max(0, item.pct as number))}%` }}
                           className={`h-full ${barColor} transition-all duration-300`}
                         />
                       </div>

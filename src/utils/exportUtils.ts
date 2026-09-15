@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { getBrandAccent } from './brand';
 import { SapProjectFinancial, AppStateData } from '../types';
 import { formatCurrencyBRL } from './dateUtils';
 
@@ -219,9 +220,13 @@ export function exportStateToJson(
 
 /**
  * Generates an Executive PowerPoint compatible Presentation (.ppt) file
- * formatted with corporate Exed visual identity (Blue #0B2240, Orange #F26522, White)
+ * formatted with corporate Exed visual identity.
+ * As cores vêm dos tokens de src/index.css via getBrandAccent/getBrandBlue —
+ * este HTML é um documento separado e não herda o :root do app, por isso o
+ * valor precisa ser interpolado como string.
  */
 export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string) {
+  const ACCENT = getBrandAccent();
   const totalPlanned = projects.reduce((acc, p) => acc + p.budgetPlanned, 0);
   const totalRealized = projects.reduce((acc, p) => acc + p.budgetRealized, 0);
   const totalBilled = projects.reduce((acc, p) => acc + p.billed, 0);
@@ -248,12 +253,12 @@ export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string
 <style>
   body { font-family: 'Arial', sans-serif; margin: 0; padding: 20px; background: #0B2240; color: #FFFFFF; }
   .slide { background: #FFFFFF; color: #0B2240; border-radius: 8px; padding: 40px; margin-bottom: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); page-break-after: always; min-height: 520px; }
-  .header { border-bottom: 3px solid #F26522; padding-bottom: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+  .header { border-bottom: 3px solid ${ACCENT}; padding-bottom: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
   .title { font-size: 26px; font-weight: bold; color: #0B2240; margin: 0; }
-  .tag { background: #F26522; color: #FFFFFF; font-size: 12px; padding: 4px 10px; font-weight: bold; }
+  .tag { background: ${ACCENT}; color: #FFFFFF; font-size: 12px; padding: 4px 10px; font-weight: bold; }
   .kpi-row { display: flex; gap: 15px; margin-bottom: 25px; }
   .kpi-box { flex: 1; background: #F8FAFC; border: 1px solid #E2E8F0; border-left: 4px solid #0B2240; padding: 15px; }
-  .kpi-box.orange { border-left-color: #F26522; }
+  .kpi-box.orange { border-left-color: ${ACCENT}; }
   .kpi-label { font-size: 11px; text-transform: uppercase; color: #64748B; font-weight: bold; }
   .kpi-value { font-size: 20px; font-weight: bold; color: #0B2240; margin-top: 4px; }
   table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }
@@ -273,13 +278,13 @@ export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string
     <div style="font-size: 44px; font-weight: bold; letter-spacing: -1px; margin-bottom: 10px; color: #FFFFFF;">
       Exed Consulting
     </div>
-    <div style="font-size: 24px; color: #F26522; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 25px;">
+    <div style="font-size: 24px; color: ${ACCENT}; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 25px;">
       VMO Corporativo | Relatório Executivo de Projetos SAP
     </div>
     <div style="font-size: 16px; color: #CBD5E1; max-width: 600px; margin-bottom: 40px;">
       Demonstrativo Financeiro e Status de Tráfego das Soluções Fábrica, RISE, GROW, SCP (IBP) e SCE
     </div>
-    <div style="background: rgba(255,255,255,0.1); padding: 10px 24px; border: 1px solid #F26522; font-size: 13px;">
+    <div style="background: rgba(255,255,255,0.1); padding: 10px 24px; border: 1px solid ${ACCENT}; font-size: 13px;">
       Período de Referência: ${periodLabel}
     </div>
   </div>
@@ -305,7 +310,7 @@ export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string
       </div>
       <div class="kpi-box orange">
         <div class="kpi-label">Faturamento Emitido</div>
-        <div class="kpi-value" style="color: #F26522;">${formatCurrencyBRL(totalBilled)}</div>
+        <div class="kpi-value" style="color: ${ACCENT};">${formatCurrencyBRL(totalBilled)}</div>
       </div>
       <div class="kpi-box">
         <div class="kpi-label">Margem Bruta Média</div>

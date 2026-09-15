@@ -11,7 +11,7 @@ import {
 import { SupabaseUsuarioRow } from '../services/supabaseService';
 
 export const INITIAL_USER_PROMPT = `User Story macro
-Quero fazer um mockup que apenas tenha o front-end funcionando, mas que todos os processos desse front end estejam funcionando perfeitamente. Será um webapp que tem o objetivo de mostrar informações, quase um Sharepoint/google drive, a grande diferença e propósito, é que será um webapp para demonstração de relatórios executivos levantados pelo VMO Corporativo. 
+Quero fazer um mockup que apenas tenha o front-end funcionando, mas que todos os processos desse front end estejam funcionando perfeitamente. Será um webapp que tem o objetivo de mostrar informações, quase um SharePoint, a grande diferença e propósito, é que será um webapp para demonstração de relatórios executivos levantados pelo VMO Corporativo. 
 
 BPD - Estrutura técnica
 A sustentação do webapp deve ser em Vercel e utilizando Next.js com Tailwind CSS ou similar para garantir um design responsivo e moderno.
@@ -904,10 +904,19 @@ export const INITIAL_WIDGETS: DashboardWidgetConfig[] = [
 ];
 
 export const DEFAULT_CONTAINER_SETTINGS = {
-  annualRevenueTarget: 120000000,
-  contractMarginTarget: 24.0,
+  // T7 — METAS SEM VALOR PADRÃO.
+  // Antes havia `annualRevenueTarget: 120000000` e `contractMarginTarget: 24.0`
+  // aqui. Como o dashboard desenhava a linha de meta sempre que o campo tinha
+  // valor, uma instalação nova exibia uma "meta de R$ 120 milhões" que ninguém
+  // na empresa tinha definido — e que era lida como meta oficial no relatório
+  // executivo. Agora nascem indefinidas: sem meta configurada, nenhuma linha de
+  // meta é desenhada e as cores usam a média do próprio período como referência.
+  annualRevenueTarget: undefined as number | undefined,
+  contractMarginTarget: undefined as number | undefined,
+
   topClientsLimit: 5,
   gaugeMinScale: 94.0,
+  governanceComplianceThreshold: 80.0,
   delayRedLimit: 2.0,
   detractorRevenueCutoff: 0,
   docsGreenLimit: 80,
@@ -915,6 +924,7 @@ export const DEFAULT_CONTAINER_SETTINGS = {
   legacyNoticeText: 'Dados antigos não incluídos, controle interno agendado',
   almAdoptionTarget: 80,
   npsPromoterCutoff: 75,
+  npsTargetScore: 8.5,
   crHighValueAlert: 100000
 };
 
@@ -929,10 +939,10 @@ export const INITIAL_PAGE_LAYOUT: PageLayoutConfig[] = [
 ];
 
 export const INITIAL_CONTAINER_LAYOUT: ContainerLayoutConfig[] = [
-  { id: 'one_page__principais_informacoes', pageKey: 'one_page', label: 'Principais Informações', order: 0, hidden: false },
-  { id: 'one_page__meta_receita', pageKey: 'one_page', label: 'Meta de Receita (Burnup)', order: 1, hidden: false },
-  { id: 'one_page__meta_margem', pageKey: 'one_page', label: 'Meta de Margem', order: 2, hidden: false },
-  { id: 'one_page__contribuicoes_metas', pageKey: 'one_page', label: 'Contribuições para as Metas', order: 3, hidden: false },
+  { id: 'one_page__principais_informacoes', pageKey: 'one_page', label: 'Principais Informações do Mês', order: 0, hidden: false },
+  { id: 'one_page__meta_receita', pageKey: 'one_page', label: 'Receita Acumulada (Burnup)', order: 1, hidden: false },
+  { id: 'one_page__meta_margem', pageKey: 'one_page', label: 'Evolução da Margem', order: 2, hidden: false },
+  { id: 'one_page__contribuicoes_metas', pageKey: 'one_page', label: 'Contribuições por Cliente', order: 3, hidden: false },
 
   { id: 'pontos_atencao__detratores', pageKey: 'pontos_atencao', label: 'Projetos Detratores', order: 0, hidden: false },
   { id: 'pontos_atencao__cronogramas', pageKey: 'pontos_atencao', label: 'Aderência aos Cronogramas e Atrasos', order: 1, hidden: false },

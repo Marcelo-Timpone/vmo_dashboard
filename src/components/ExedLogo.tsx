@@ -41,7 +41,7 @@ export const ExedLogo: React.FC<ExedLogoProps> = ({
       {showSubtitle && (
         <span
           className={`text-xs uppercase tracking-wider font-bold ${
-            isWhite ? 'text-orange-400' : 'text-[#F26522]'
+            isWhite ? 'text-exed-accent' : 'text-exed-accent'
           }`}
         >
           VMO

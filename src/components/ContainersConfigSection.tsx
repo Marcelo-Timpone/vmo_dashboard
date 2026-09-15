@@ -5,20 +5,11 @@ import { SapProjectFinancial, ContainerParamSettings } from '../types';
 export type { ContainerParamSettings };
 
 
-export const DEFAULT_CONTAINER_SETTINGS: ContainerParamSettings = {
-  annualRevenueTarget: 120000000,
-  contractMarginTarget: 24.0,
-  topClientsLimit: 5,
-  gaugeMinScale: 94.0,
-  delayRedLimit: 2.0,
-  detractorRevenueCutoff: 0,
-  docsGreenLimit: 80,
-  docsYellowLimit: 70,
-  legacyNoticeText: 'Dados antigos não incluídos, controle interno agendado',
-  almAdoptionTarget: 80,
-  npsPromoterCutoff: 75,
-  crHighValueAlert: 100000
-};
+// T7 — metas nascem SEM valor (ver comentário em src/data/initialData.ts).
+// Esta lista duplicava a de initialData.ts e as duas saíam de sincronia com
+// facilidade; agora é reexportada de lá, com uma fonte só.
+export { DEFAULT_CONTAINER_SETTINGS } from '../data/initialData';
+import { DEFAULT_CONTAINER_SETTINGS as DEFAULTS } from '../data/initialData';
 
 interface ContainersConfigSectionProps {
   projects: SapProjectFinancial[];
@@ -46,8 +37,8 @@ export const ContainersConfigSection: React.FC<ContainersConfigSectionProps> = (
   };
 
   const handleReset = () => {
-    setSettings(DEFAULT_CONTAINER_SETTINGS);
-    onUpdateSettings(DEFAULT_CONTAINER_SETTINGS);
+    setSettings(DEFAULTS);
+    onUpdateSettings(DEFAULTS);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 4000);
   };
@@ -98,12 +89,22 @@ export const ContainersConfigSection: React.FC<ContainersConfigSectionProps> = (
               </label>
               <input
                 type="number"
-                value={settings.annualRevenueTarget}
-                onChange={e => setSettings({ ...settings, annualRevenueTarget: Number(e.target.value) })}
+                value={settings.annualRevenueTarget ?? ''}
+                onChange={e =>
+                  setSettings({
+                    ...settings,
+                    // Campo vazio = sem meta. Não vira 0 nem cai num padrão.
+                    annualRevenueTarget: e.target.value === '' ? undefined : Number(e.target.value)
+                  })
+                }
                 className="w-full p-1.5 border border-slate-300 text-xs bg-white font-mono text-slate-900"
                 step="1000000"
+                placeholder="Deixe vazio para não exibir linha de meta"
               />
-              <span className="text-[10px] text-slate-500">Padrão: R$ 120.000.000 (R$ 120M)</span>
+              <span className="text-[10px] text-slate-500">
+                Vazio = a linha de meta não é desenhada no gráfico (T7). O gráfico continua
+                mostrando o faturamento real acumulado normalmente.
+              </span>
             </div>
 
             <div>
@@ -112,12 +113,21 @@ export const ContainersConfigSection: React.FC<ContainersConfigSectionProps> = (
               </label>
               <input
                 type="number"
-                value={settings.contractMarginTarget}
-                onChange={e => setSettings({ ...settings, contractMarginTarget: Number(e.target.value) })}
+                value={settings.contractMarginTarget ?? ''}
+                onChange={e =>
+                  setSettings({
+                    ...settings,
+                    contractMarginTarget: e.target.value === '' ? undefined : Number(e.target.value)
+                  })
+                }
                 className="w-full p-1.5 border border-slate-300 text-xs bg-white font-mono text-slate-900"
                 step="0.1"
+                placeholder="Deixe vazio para não exibir linha de meta"
               />
-              <span className="text-[10px] text-slate-500">Padrão: 24.0%</span>
+              <span className="text-[10px] text-slate-500">
+                Vazio = sem linha de meta. As barras passam a ser coloridas contra a média do
+                próprio período, em vez de contra uma meta.
+              </span>
             </div>
 
             <div>
@@ -292,7 +302,7 @@ export const ContainersConfigSection: React.FC<ContainersConfigSectionProps> = (
         <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
           <button
             type="submit"
-            className="px-4 py-2 bg-[#0B2240] hover:bg-[#F26522] text-white font-bold cursor-pointer border-none text-xs flex items-center gap-1.5 shadow-sm transition-colors"
+            className="px-4 py-2 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs flex items-center gap-1.5 shadow-sm transition-colors"
           >
             <Save size={13} />
             Salvar Parâmetros dos Contêineres (Afetar Dashboard)

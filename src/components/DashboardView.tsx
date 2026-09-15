@@ -315,6 +315,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               containerSettings={containerSettings}
               containerLayout={containerLayout}
               isPmo={isPmo}
+              monthlyHistory={monthlyHistory}
             />
           </div>
         );
@@ -332,6 +333,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               containerSettings={containerSettings}
               containerLayout={containerLayout}
               isPmo={isPmo}
+              monthlyHistory={monthlyHistory}
             />
           </div>
         );
@@ -352,6 +354,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               theme={theme}
               containerLayout={containerLayout}
               isPmo={isPmo}
+              containerSettings={containerSettings}
+              monthlyHistory={monthlyHistory}
             />
           </div>
         );
@@ -395,7 +399,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span
                 className={`transition-all rounded-full ${
                   isActive
-                    ? 'w-3 h-3 bg-[#F26522]'
+                    ? 'w-3 h-3 bg-exed-accent'
                     : isHiddenFromOthers
                     ? 'w-2 h-2 bg-amber-500/70 hover:bg-amber-400'
                     : 'w-2 h-2 bg-slate-600 hover:bg-slate-400'
@@ -419,12 +423,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             : 'bg-[#091B2E] border-[#16385C] shadow-[0_4px_15px_rgba(0,0,0,0.3)]'
         }`}>
           <div className="flex items-center gap-2">
-            <Calendar size={14} className="text-[#F26522]" />
+            <Calendar size={14} className="text-exed-accent" />
             <span className={`font-bold ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>Data de Referência:</span>
             <span className={`font-mono font-bold px-2.5 py-0.5 border ${
               isLight
-                ? 'bg-slate-50 text-[#F26522] border-slate-200'
-                : 'bg-[#06121E] text-[#F26522] border-[#F26522]/30'
+                ? 'bg-slate-50 text-exed-accent border-slate-200'
+                : 'bg-[#06121E] text-exed-accent border-exed-accent/30'
             }`}>
               {referencePeriod.startDate} até {referencePeriod.endDate}
             </span>
@@ -448,7 +452,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               type="button"
               onClick={handleExportDevClick}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F26522] hover:bg-orange-600 text-white font-bold cursor-pointer border-none text-xs transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-exed-accent hover:bg-exed-accent-strong text-white font-bold cursor-pointer border-none text-xs transition-colors"
               title="Exportar em PPT"
             >
               <Presentation size={13} className="text-white" />
@@ -464,7 +468,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           className={`fixed z-50 top-14 left-1/2 -translate-x-1/2 px-4 py-2 border text-xs font-bold no-print shadow-xl transition-all ${
             isLight
               ? 'bg-amber-50 text-amber-900 border-amber-300'
-              : 'bg-[#0B2240] text-[#F26522] border-[#F26522]'
+              : 'bg-[#0B2240] text-exed-accent border-exed-accent'
           }`}
         >
           {exportNotice}

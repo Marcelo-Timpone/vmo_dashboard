@@ -1,9 +1,22 @@
 import { AppStateData } from '../types';
 
-export const DEFAULT_EXED_API_KEY = 'exed_claude_vmo_live_sec_key_2026';
+// ==============================================================================
+// CHAVE DA API NO FRONTEND
+// ==============================================================================
+// Este arquivo vai inteiro para o bundle servido ao navegador. Qualquer literal
+// aqui é PÚBLICO — basta abrir o DevTools para lê-lo.
+//
+// Antes havia a chave de produção escrita nesta linha, o que a publicava para
+// qualquer visitante do site. Agora o padrão é vazio: o PMO cola a própria
+// chave em Configurações > API do Claude e ela fica só no localStorage daquele
+// navegador. Leituras do próprio dashboard (GET de mesma origem) não precisam
+// de chave; só escrita precisa.
+export const DEFAULT_EXED_API_KEY = '';
 
 /**
- * Retorna a chave de API configurada para o Claude (armazenada localmente ou a padrão)
+ * Retorna a chave de API que este navegador tem guardada.
+ * String vazia significa "nenhuma chave configurada" — a escrita vai falhar com
+ * 401, e é isso mesmo que deve acontecer.
  */
 export function getStoredApiKey(): string {
   try {
@@ -11,6 +24,11 @@ export function getStoredApiKey(): string {
     if (saved && saved.trim()) return saved.trim();
   } catch {}
   return DEFAULT_EXED_API_KEY;
+}
+
+/** true quando este navegador tem chave guardada. */
+export function hasStoredApiKey(): boolean {
+  return getStoredApiKey().length > 0;
 }
 
 /**

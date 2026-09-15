@@ -140,7 +140,7 @@ export const UsersConfigSection: React.FC<UsersConfigSectionProps> = ({ session 
               required
               value={newUser.username}
               onChange={e => setNewUser(prev => ({ ...prev, username: e.target.value }))}
-              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-[#F26522]"
+              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-exed-accent"
               placeholder="nome@exedconsulting.com"
             />
           </div>
@@ -151,7 +151,7 @@ export const UsersConfigSection: React.FC<UsersConfigSectionProps> = ({ session 
               required
               value={newUser.name}
               onChange={e => setNewUser(prev => ({ ...prev, name: e.target.value }))}
-              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-[#F26522]"
+              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-exed-accent"
               placeholder="Nome do usuário"
             />
           </div>
@@ -163,7 +163,7 @@ export const UsersConfigSection: React.FC<UsersConfigSectionProps> = ({ session 
               minLength={8}
               value={newUser.password}
               onChange={e => setNewUser(prev => ({ ...prev, password: e.target.value }))}
-              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-[#F26522]"
+              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-exed-accent"
               placeholder="Senha inicial"
             />
           </div>
@@ -172,7 +172,7 @@ export const UsersConfigSection: React.FC<UsersConfigSectionProps> = ({ session 
             <select
               value={newUser.role}
               onChange={e => setNewUser(prev => ({ ...prev, role: e.target.value as UserRole }))}
-              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-[#F26522] bg-white"
+              className="w-full px-2.5 py-1.5 border border-slate-300 text-xs focus:outline-none focus:border-exed-accent bg-white"
             >
               <option value="demonstrativo">Demonstrativo (somente leitura)</option>
               <option value="pmo">PMO (acesso total)</option>
@@ -182,7 +182,7 @@ export const UsersConfigSection: React.FC<UsersConfigSectionProps> = ({ session 
         <button
           type="submit"
           disabled={isCreating}
-          className="px-4 py-2 bg-[#F26522] hover:bg-orange-600 disabled:opacity-60 text-white text-xs font-bold uppercase tracking-wide cursor-pointer transition-colors"
+          className="px-4 py-2 bg-exed-accent hover:bg-exed-accent-strong disabled:opacity-60 text-white text-xs font-bold uppercase tracking-wide cursor-pointer transition-colors"
         >
           {isCreating ? 'Criando...' : 'Adicionar Usuário'}
         </button>
@@ -250,7 +250,7 @@ export const UsersConfigSection: React.FC<UsersConfigSectionProps> = ({ session 
                     <div className="text-[11px] text-slate-500">
                       {user.name} ·{' '}
                       <span
-                        className={`font-bold ${user.role === 'pmo' ? 'text-[#F26522]' : 'text-slate-500'}`}
+                        className={`font-bold ${user.role === 'pmo' ? 'text-exed-accent' : 'text-slate-500'}`}
                       >
                         {user.role === 'pmo' ? 'PMO' : 'Demonstrativo'}
                       </span>

@@ -8,12 +8,64 @@ export type TrafficTag = 'Verde' | 'Amarelo' | 'Vermelho';
 
 export type ProjectStatus = 'ATIVO' | 'ENCERRADO' | 'DEMONSTRATIVO';
 
+/**
+ * Recorte de um projeto dentro de um mês fechado. Existe para que o
+ * "Comparativo Mês Ant." por projeto (Informações Gerais e Detalhamento
+ * Financeiro) seja CALCULADO em vez de digitado à mão. É opcional: quando não
+ * houver snapshot do mês anterior para um projeto, a interface mostra "—" em
+ * vez de inventar uma variação.
+ *
+ * `projectId` deve ser o mesmo identificador estável usado em
+ * SapProjectFinancial.id (derivado do `Project ID (S4 Public Exed)`), NUNCA o
+ * nome do arquivo da RSE — os nomes mudam de uma semana para a outra.
+ */
+export interface MonthlyProjectSnapshot {
+  projectId: string;
+  client?: string;
+  solution?: string;
+  budgetRealized?: number; // uso de orçamento real no mês (R$)
+  billed?: number; // faturado acumulado do projeto até o fechamento do mês (R$)
+  marginPercent?: number; // margem do projeto no mês (%)
+  reimbursableExpenseTotal?: number; // gasto reembolsável do projeto no mês (R$)
+}
+
 export interface MonthlyKpiSnapshot {
   monthKey: string; // 'YYYY-MM', ex: '2026-03' — usado como identificador único
   year: number;
   month: number; // 1 a 12
   revenueBilled: number; // faturamento total do mês (R$), NÃO acumulado
   marginAvg: number; // margem média do mês (%)
+
+  // ---------------------------------------------------------------------------
+  // Campos OPCIONAIS acrescentados para os comparativos mês a mês.
+  // São opcionais de propósito: registros gravados antes desta versão continuam
+  // válidos. Onde o dado não existir, a interface não desenha o comparativo —
+  // nunca preenche com estimativa.
+  // ---------------------------------------------------------------------------
+
+  // One Page — cartões de "Principais informações do mês"
+  totalSpend?: number; // gasto/uso de orçamento total do mês (R$)
+  clientsServed?: number; // clientes distintos atendidos no mês
+  goLivesCompleted?: number; // go-lives concluídos no mês
+  activeProjects?: number; // projetos ativos no mês
+  avgScheduleDelay?: number; // atraso médio de cronograma no mês (%)
+  npsAvg?: number; // NPS médio do mês (0 a 10)
+
+  // Pontos de Atenção
+  signedDocsAvg?: number; // % médio de documentação assinada junto ao PMO
+  detractorCount?: number; // projetos abaixo da meta de receita ou de margem
+
+  // Informações Gerais
+  almAdoptionPercent?: number; // % de projetos usando SAP Cloud ALM
+  openCrCount?: number; // quantidade de CRs em aberto no mês
+  openCrValue?: number; // valor somado das CRs em aberto (R$)
+
+  // Detalhamento Financeiro
+  plannedBudgetTotal?: number; // uso de orçamento total planejado (R$)
+  reimbursableTotal?: number; // total de gasto reembolsável do mês (R$)
+
+  // Detalhe por projeto (habilita o comparativo por linha das tabelas)
+  projectSnapshots?: MonthlyProjectSnapshot[];
 }
 
 export interface UserSession {
@@ -189,12 +241,16 @@ export interface AppStateData {
 
 export interface ContainerParamSettings {
   // One Page Settings
-  annualRevenueTarget: number; // Meta de receita total (ex: 120000000)
-  contractMarginTarget: number; // Meta de margem contratual (ex: 24.0)
+  // As metas são OPCIONAIS: quando vierem vazias/zeradas, a linha de meta
+  // simplesmente não é desenhada no gráfico (em vez de cair num default de
+  // 120 milhões que ninguém configurou).
+  annualRevenueTarget?: number; // Meta de receita total (ex: 120000000)
+  contractMarginTarget?: number; // Meta de margem contratual (ex: 24.0)
   topClientsLimit: number; // Quantos clientes mostrar no ranking (ex: 5)
 
   // Pontos de Atenção Settings
   gaugeMinScale: number; // Escala mínima do gráfico de arco (ex: 94.0)
+  governanceComplianceThreshold?: number; // Limite de conformidade de documentação (ex: 80.0)
   delayRedLimit: number; // Atraso considerado crítico em vermelho (ex: 2.0%)
   detractorRevenueCutoff: number; // Ponto de corte para detratores de receita (ex: 0 = abaixo do orçado)
   docsGreenLimit: number; // Limite verde para documentação assinada (ex: 80%)
@@ -204,6 +260,7 @@ export interface ContainerParamSettings {
   // Informações Gerais Settings
   almAdoptionTarget: number; // Meta de adoção SAP Cloud ALM (ex: 80%)
   npsPromoterCutoff: number; // Ponto de corte para cliente promotor (ex: 75 ou nota 9)
+  npsTargetScore?: number; // Nota de NPS considerada promotora, escala 0-10 (ex: 8.5)
   crHighValueAlert: number; // Valor de CR que aciona alerta de risco no PMO (ex: 100000)
 }
 

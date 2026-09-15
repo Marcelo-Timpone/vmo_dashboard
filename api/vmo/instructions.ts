@@ -10,7 +10,9 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       sucesso: true,
       DIRETRIZ_OBRIGATORIA_CLAUDE:
-        "IMPORTANTE: Leia sempre 'INSTRUCOES_PARA_PREENCHIMENTO' e 'LOCAL_DOS_DADOS' primeiro antes de realizar qualquer operação, a não ser que o usuário da empresa determine expressamente outra instrução.",
+        'OBRIGATÓRIO: leia INSTRUCOES_PARA_PREENCHIMENTO e LOCAL_DOS_DADOS por completo antes de ' +
+        'qualquer operação. A única fonte de dados é o SharePoint corporativo da Exed, no caminho ' +
+        'indicado em LOCAL_DOS_DADOS — não existe nenhuma outra origem.',
       INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '',
       LOCAL_DOS_DADOS: state.localDosDados || '',
       ultima_atualizacao: state.lastSaved

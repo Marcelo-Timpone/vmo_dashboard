@@ -9,6 +9,9 @@ interface HeaderProps {
   session: UserSession | null;
   referencePeriod?: VmoReferencePeriod;
   onLogout: () => void;
+  // T9 — o seletor de temas foi removido da interface e o app é fixo em 'neon'.
+  // As props continuam aceitas (opcionais) só para não quebrar chamadas
+  // existentes; nada no Header as utiliza mais.
   theme?: AppTheme;
   onThemeChange?: (theme: AppTheme) => void;
 }
@@ -18,15 +21,13 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectTab,
   session,
   referencePeriod,
-  onLogout,
-  theme = 'neon',
-  onThemeChange
+  onLogout
 }) => {
   const isPmo = session?.role === 'pmo';
   const monthLabel = getReferenceMonthLabel(referencePeriod);
 
   return (
-    <header className="sticky top-0 z-40 bg-[#071726] text-white border-b-2 border-[#F26522] shadow-[0_4px_20px_rgba(0,0,0,0.4)] no-print">
+    <header className="sticky top-0 z-40 bg-[#071726] text-white border-b-2 border-exed-accent shadow-[0_4px_20px_rgba(0,0,0,0.4)] no-print">
       {/* Top Brand Bar */}
       <div className="w-full px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3 sm:gap-4">
@@ -36,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-white font-bold tracking-wide text-sm sm:text-base">
               VMO - Relatórios Executivos
             </span>
-            <span className="text-[#F26522] font-semibold text-xs sm:text-sm bg-[#0B2240] px-2.5 py-0.5 border border-[#F26522]/30">
+            <span className="text-exed-accent font-semibold text-xs sm:text-sm bg-[#0B2240] px-2.5 py-0.5 border border-exed-accent/30">
               {monthLabel}
             </span>
           </div>
@@ -52,55 +53,10 @@ export const Header: React.FC<HeaderProps> = ({
                   <strong className="text-white font-semibold">{session.name || session.username}</strong>
                 </div>
 
-                {/* Opções de Tema para o Mockup Demonstrativo ao lado do botão Sair */}
-                {onThemeChange && (
-                  <div className="flex items-center gap-0.5 bg-[#050F1A] p-0.5 border border-slate-700">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 px-1.5 hidden md:inline">
-                      Tema:
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onThemeChange('neon')}
-                      className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${
-                        theme === 'neon'
-                          ? 'bg-[#00D2FF] text-[#06121E]'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                      }`}
-                      title="Tema Neon Corporativo"
-                    >
-                      Neon
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onThemeChange('dark-solid')}
-                      className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${
-                        theme === 'dark-solid'
-                          ? 'bg-[#F26522] text-white'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                      }`}
-                      title="Tema Dark com cores sólidas e sem brilho"
-                    >
-                      Dark Sólido
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onThemeChange('light')}
-                      className={`px-2 py-0.5 text-[10px] font-bold transition-colors cursor-pointer ${
-                        theme === 'light'
-                          ? 'bg-white text-slate-900 font-black'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800'
-                      }`}
-                      title="Tema com fundo branco e cores sólidas"
-                    >
-                      Branco Limpo
-                    </button>
-                  </div>
-                )}
-
                 <button
                   type="button"
                   onClick={onLogout}
-                  className="px-2.5 py-1 bg-[#F26522]/15 hover:bg-[#F26522] text-[#F26522] hover:text-white border border-[#F26522]/40 font-bold cursor-pointer transition-colors"
+                  className="px-2.5 py-1 bg-exed-accent/15 hover:bg-exed-accent text-exed-accent hover:text-white border border-exed-accent/40 font-bold cursor-pointer transition-colors"
                 >
                   Sair
                 </button>
@@ -110,7 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={onLogout}
-                className="px-2.5 py-1 bg-[#F26522]/15 hover:bg-[#F26522] text-[#F26522] hover:text-white border border-[#F26522]/40 font-bold cursor-pointer transition-colors"
+                className="px-2.5 py-1 bg-exed-accent/15 hover:bg-exed-accent text-exed-accent hover:text-white border border-exed-accent/40 font-bold cursor-pointer transition-colors"
               >
                 Sair
               </button>
@@ -129,7 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onSelectTab('dashboard')}
             className={`px-4 py-2 text-xs font-bold tracking-wider uppercase transition-colors cursor-pointer border-b-2 ${
               currentTab === 'dashboard'
-                ? 'border-[#F26522] text-[#F26522] bg-[#0A1C30]'
+                ? 'border-exed-accent text-exed-accent bg-[#0A1C30]'
                 : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/60'
             }`}
           >
@@ -141,7 +97,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => onSelectTab('configuracao')}
             className={`px-4 py-2 text-xs font-bold tracking-wider uppercase transition-colors cursor-pointer border-b-2 ${
               currentTab === 'configuracao'
-                ? 'border-[#F26522] text-[#F26522] bg-[#0A1C30]'
+                ? 'border-exed-accent text-exed-accent bg-[#0A1C30]'
                 : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-800/60'
             }`}
           >

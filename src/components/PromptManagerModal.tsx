@@ -125,19 +125,19 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-3" id="prompt-history-modal">
       <div className="bg-white border-2 border-[#0B2240] w-full max-w-5xl max-h-[92vh] flex flex-col shadow-2xl">
         {/* Modal Header */}
-        <div className="bg-[#0B2240] text-white px-4 py-3 flex items-center justify-between border-b-2 border-[#F26522]">
+        <div className="bg-[#0B2240] text-white px-4 py-3 flex items-center justify-between border-b-2 border-exed-accent">
           <div className="flex items-center gap-2">
             <span className="font-bold text-sm sm:text-base tracking-wide">
               Histórico Completo de Prompts e Especificações do Projeto
             </span>
-            <span className="bg-[#F26522] text-white text-[11px] font-bold px-2 py-0.5">
+            <span className="bg-exed-accent text-white text-[11px] font-bold px-2 py-0.5">
               {prompts.length} Registros
             </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-white hover:text-[#F26522] font-bold text-sm cursor-pointer bg-transparent border-none"
+            className="text-white hover:text-exed-accent font-bold text-sm cursor-pointer bg-transparent border-none"
           >
             [ Fechar ]
           </button>
@@ -152,7 +152,7 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
             <button
               type="button"
               onClick={handleDownloadAllText}
-              className="bg-[#F26522] hover:bg-orange-600 text-white font-bold px-3 py-1.5 cursor-pointer border-none flex items-center gap-1.5 transition-colors shadow-sm"
+              className="bg-exed-accent hover:bg-exed-accent-strong text-white font-bold px-3 py-1.5 cursor-pointer border-none flex items-center gap-1.5 transition-colors shadow-sm"
               title="Baixar arquivo TXT com todos os prompts compilados"
             >
               <span>Baixar Todos (.TXT)</span>
@@ -226,7 +226,7 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
                   >
                     <div className="flex items-center justify-between mb-0.5">
                       <span className={`font-mono text-[10px] font-bold px-1.5 py-0.2 ${
-                        selectedPrompt?.id === p.id ? 'bg-[#F26522] text-white' : 'bg-slate-200 text-slate-700'
+                        selectedPrompt?.id === p.id ? 'bg-exed-accent text-white' : 'bg-slate-200 text-slate-700'
                       }`}>
                         #{idx + 1}
                       </span>
@@ -259,7 +259,7 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleCopy(selectedPrompt.content)}
-                        className="px-2.5 py-1 bg-[#0B2240] hover:bg-[#F26522] text-white text-xs font-semibold cursor-pointer border-none transition-colors"
+                        className="px-2.5 py-1 bg-[#0B2240] hover:bg-exed-accent text-white text-xs font-semibold cursor-pointer border-none transition-colors"
                       >
                         Copiar Este
                       </button>
@@ -274,7 +274,7 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
                     </div>
                   </div>
 
-                  <pre className="p-3 bg-slate-50 border border-slate-200 text-slate-900 text-xs whitespace-pre-wrap font-mono overflow-y-auto max-h-72 leading-relaxed selection:bg-[#F26522] selection:text-white">
+                  <pre className="p-3 bg-slate-50 border border-slate-200 text-slate-900 text-xs whitespace-pre-wrap font-mono overflow-y-auto max-h-72 leading-relaxed selection:bg-exed-accent selection:text-white">
                     {selectedPrompt.content}
                   </pre>
                 </>
@@ -307,7 +307,7 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
               <div className="flex justify-end gap-2">
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-[#F26522] hover:bg-orange-600 text-white font-bold text-xs cursor-pointer border-none transition-colors"
+                  className="px-4 py-1.5 bg-exed-accent hover:bg-exed-accent-strong text-white font-bold text-xs cursor-pointer border-none transition-colors"
                 >
                   Salvar Prompt no Registro
                 </button>
@@ -323,14 +323,14 @@ export const PromptManagerModal: React.FC<PromptManagerModalProps> = ({
             <button
               type="button"
               onClick={handleDownloadAllText}
-              className="text-[#0B2240] hover:text-[#F26522] font-semibold underline cursor-pointer bg-transparent border-none"
+              className="text-[#0B2240] hover:text-exed-accent font-semibold underline cursor-pointer bg-transparent border-none"
             >
               [ Baixar Todos .TXT ]
             </button>
             <button
               type="button"
               onClick={handleDownloadAllJson}
-              className="text-[#0B2240] hover:text-[#F26522] font-semibold underline cursor-pointer bg-transparent border-none"
+              className="text-[#0B2240] hover:text-exed-accent font-semibold underline cursor-pointer bg-transparent border-none"
             >
               [ Baixar Todos .JSON ]
             </button>

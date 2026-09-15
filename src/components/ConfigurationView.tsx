@@ -25,7 +25,7 @@ import {
   setStoredApiKey,
   testClaudeApiConnection,
   syncVmoServerState,
-  DEFAULT_EXED_API_KEY
+  hasStoredApiKey
 } from '../services/apiService';
 import {
   pingAndSyncSupabase,
@@ -57,6 +57,7 @@ interface ConfigurationViewProps {
   onUpdateClients?: (clients: ClientInfo[]) => void;
   onRestoreDefaults: () => void;
   theme?: AppTheme;
+  // T9 — tema fixo 'neon'. Prop mantida só por compatibilidade; não é usada.
   onThemeChange?: (theme: AppTheme) => void;
   localDosDados?: string;
   onUpdateLocalDosDados?: (link: string) => void;
@@ -69,12 +70,43 @@ interface ConfigurationViewProps {
   onUpdateMonthlyHistory: (history: MonthlyKpiSnapshot[]) => void;
 }
 
-export const DEFAULT_APP_INSTRUCOES = `Atualize os dados do dashboard com as informações presentes na URL do mês de referência. Se você não tem um mês específico que busca, verifique a data atual e encontre o dados desde o dia 02 do mês atual, até o presente momento. Caso seja o primeiro dia do mês atual, deve ser considerada a data referência desde o dia 02 do mês anterior.
-Todas as informações necessárias estão no Link 2 e a última versão atualizada dos dados está no link 1.
-Realize o fluxo: 
-(1) Acesse o link 2, acesse o mês de referência, acesse a primeira pasta em ordem alfabética, acesse as pastas Dashboard - GROW + DSC e Dashboard - RISE + FSW, leia todas as planilhas dentro de cada uma dessas pastas. 
-(2) Repita esse fluxo até ler todas as pastas dentro do mês de referência.
-(3) Atualize as informações do webapp de acordo com as leituras de todos os documentos.`;
+export const DEFAULT_APP_INSTRUCOES = `FONTE DOS DADOS
+A única fonte de dados deste webapp é o SharePoint corporativo da Exed, no
+caminho configurado em "Local dos dados". Não existe outra origem.
+
+ESTRUTURA
+AAAAMM_Mês / AAAAMMDD - Delivery / Dashboard - ... /
+AAAAMMDD_PMO RSE_<PORTFOLIO>_<CLIENTE>_<PROJETO>.xlsm
+
+Processe SÓ arquivos com "PMO RSE_" no nome. Cuidado: "PMO RISE_" (com I antes
+do S) NÃO é arquivo válido.
+
+LEITURA
+Leia a aba "MIRROR ACTUAL" — lista chave-valor das linhas 1 a 1084. Não raspe as
+abas visuais: a posição das células muda e a leitura quebra.
+Cada arquivo traz DUAS semanas ("MIRROR ACTUAL" e "LAST STATUS"), não o histórico
+inteiro — para nove meses é preciso abrir os arquivos dos nove meses.
+
+IDENTIDADE
+A identidade do projeto é o "Project ID (S4 Public Exed)" de dentro da planilha,
+NUNCA o nome do arquivo (os nomes mudam entre semanas: _v2, _v3...).
+O portfólio vem do campo "Project Portfolio" de dentro da planilha — os rótulos
+das subpastas ("RISE + FSW", "GROW + DSC") não são confiáveis.
+
+MÊS DE REFERÊNCIA
+Confirme pelo campo "Status Date" de dentro da planilha, não pela data da pasta
+ou do arquivo.
+
+ESCRITA
+substituir_projetos troca o array inteiro: envie sempre a lista completa.
+upsert_historico_mensal faz merge por monthKey: seguro para carga incremental.
+No histórico mensal, inclua projectSnapshots (um item por projeto, com o Project
+ID) — é isso que faz a coluna "Comparativo Mês Ant." ser calculada em vez de
+digitada.
+
+REGRA DE OURO
+Campo sem dado deve ser OMITIDO, nunca enviado como zero. Zero vira uma variação
+real no relatório; ausente vira "—".`;
 
 export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
   projects,
@@ -91,7 +123,6 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
   onUpdateClients = (_clients: ClientInfo[]) => {},
   onRestoreDefaults,
   theme = 'neon',
-  onThemeChange,
   localDosDados: propLocalDosDados = '',
   onUpdateLocalDosDados,
   session,
@@ -283,18 +314,25 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
 
   // Prompt Inicial Recomendado para o Claude Corporativo (Editável e com estilos padrão)
   const defaultClaudePrompt = `Você está conectado à API do VMO da Exed Consulting (${typeof window !== 'undefined' ? window.location.origin : ''}/api/vmo/state).
-Chave de acesso: ${claudeApiKey}
 
 DIRETRIZ MANDATÓRIA:
-1. Sempre leia primeiramente o endpoint GET /api/vmo/state e consulte os campos 'INSTRUCOES_PARA_PREENCHIMENTO' e os links de governança.
-2. A ÚLTIMA VERSÃO ATUALIZADA DOS DADOS do webapp está no Link 1 (Histórico de versões do webapp em JASON). Você consegue identificar a última versão pela data no nome do arquivo, que segue rigorosamente o padrão ANO, MÊS, DIA (ex: 2026-09-09 ou 20260909).
-3. Todas as informações necessárias para atualização estão no Link 2 (Dados financeiros 2026) e no mês de referência ativo (Link 3).
-4. Siga as instruções do campo 'INSTRUCOES_PARA_PREENCHIMENTO' para consolidar os dados das planilhas e atualize o estado completo enviando POST /api/vmo/state.`;
+1. Leia primeiro GET /api/vmo/state e o campo 'INSTRUCOES_PARA_PREENCHIMENTO' por completo.
+2. A ÚNICA fonte de dados é o SharePoint corporativo da Exed, na pasta indicada em 'LOCAL_DOS_DADOS'. Não existe outra origem.
+3. Processe só arquivos com "PMO RSE_" no nome. Cuidado: "PMO RISE_" (com I antes do S) NÃO é válido.
+4. Leia a aba "MIRROR ACTUAL" de cada planilha, não as abas visuais. Cada arquivo traz duas semanas, não o histórico inteiro.
+5. A identidade do projeto é o "Project ID (S4 Public Exed)" de dentro da planilha, nunca o nome do arquivo.
+6. Confirme o mês pelo "Status Date" de dentro da planilha, não pela data da pasta.
+7. Ao escrever: substituir_projetos troca o array inteiro (mande a lista completa); upsert_historico_mensal faz merge por monthKey.
+8. Campo sem dado deve ser OMITIDO, nunca enviado como zero.
+
+A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçalho 'x-api-key'.`;
 
   const [claudePrompt, setClaudePrompt] = useState<string>(() => {
     try {
       const saved = localStorage.getItem('vmo_claude_prompt');
-      if (saved && saved.includes('Link 1')) return saved;
+      // Prompts salvos na versão antiga citavam 'Link 1/Link 2' e uma origem
+      // de dados que não existe mais — são descartados para forçar o padrão novo.
+      if (saved && saved.trim() && !saved.includes('Link 1')) return saved;
     } catch {}
     return defaultClaudePrompt;
   });
@@ -685,18 +723,14 @@ DIRETRIZ MANDATÓRIA:
           } catch {}
         }
 
-        // 4. Restore Theme
+        // 4. Tema — T9: o app é fixo em 'neon'. Um backup antigo pode trazer
+        // 'light' ou 'dark-solid'; o valor é ignorado de propósito para que
+        // restaurar um backup não reintroduza um tema que saiu da interface.
         const importedTheme = parsed.theme || parsed.dados_aplicacao?.configuracoes_gerais?.tema;
-        if (
-          importedTheme &&
-          (importedTheme === 'neon' || importedTheme === 'dark-solid' || importedTheme === 'light')
-        ) {
-          try {
-            localStorage.setItem('vmo_exed_theme', importedTheme);
-          } catch {}
-          if (onThemeChange) {
-            onThemeChange(importedTheme as AppTheme);
-          }
+        if (importedTheme && importedTheme !== 'neon') {
+          console.info(
+            `[VMO] Tema "${importedTheme}" no backup foi ignorado: o app usa tema fixo Neon.`
+          );
         }
 
         // 5. Restore Supabase Users
@@ -845,7 +879,7 @@ DIRETRIZ MANDATÓRIA:
   return (
     <div className="w-full space-y-4 pb-8 select-text" id="vmo-configuration-module">
       {/* Top Banner Notice */}
-      <div className="bg-[#0B2240] text-white p-3 border-l-4 border-[#F26522] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
+      <div className="bg-[#0B2240] text-white p-3 border-l-4 border-exed-accent flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs">
         <div>
           <div className="font-bold text-sm tracking-wide">
             Painel de Configuração PMO
@@ -855,7 +889,7 @@ DIRETRIZ MANDATÓRIA:
           <button
             type="button"
             onClick={handleDownloadJsonWithReactivation}
-            className="px-3 py-1.5 bg-[#F26522] hover:bg-orange-600 text-white font-bold cursor-pointer border-none text-xs transition-colors"
+            className="px-3 py-1.5 bg-exed-accent hover:bg-exed-accent-strong text-white font-bold cursor-pointer border-none text-xs transition-colors"
             title="Baixar arquivo JASON com todas as informações do webapp"
           >
             Baixar JASON Completo
@@ -1046,7 +1080,7 @@ DIRETRIZ MANDATÓRIA:
             <button
               type="button"
               onClick={handleAddSharePointLink}
-              className="px-3 py-1.5 bg-[#0B2240] hover:bg-[#F26522] text-white font-bold cursor-pointer border-none text-xs transition-colors flex items-center gap-1.5"
+              className="px-3 py-1.5 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs transition-colors flex items-center gap-1.5"
             >
               + Adicionar Link
             </button>
@@ -1143,7 +1177,7 @@ DIRETRIZ MANDATÓRIA:
               <button
                 type="button"
                 onClick={handleSaveInstrucoesManual}
-                className="px-3 py-1.5 bg-[#0B2240] hover:bg-[#F26522] text-white font-bold cursor-pointer border-none text-xs transition-colors self-start sm:self-auto"
+                className="px-3 py-1.5 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs transition-colors self-start sm:self-auto"
               >
                 Salvar Instruções
               </button>
@@ -1153,7 +1187,7 @@ DIRETRIZ MANDATÓRIA:
               value={instrucoesPreenchimento}
               onChange={e => handleUpdateInstrucoes(e.target.value)}
               placeholder=""
-              className="w-full min-h-[160px] p-3 text-xs font-mono bg-white text-slate-900 border border-slate-300 focus:outline-none focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522] leading-relaxed resize-y"
+              className="w-full min-h-[160px] p-3 text-xs font-mono bg-white text-slate-900 border border-slate-300 focus:outline-none focus:border-exed-accent focus:ring-1 focus:ring-exed-accent leading-relaxed resize-y"
             />
           </div>
 
@@ -1176,7 +1210,7 @@ DIRETRIZ MANDATÓRIA:
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="px-4 py-2 bg-[#0B2240] hover:bg-[#F26522] text-white font-bold cursor-pointer border-none text-xs transition-colors"
+                className="px-4 py-2 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs transition-colors"
               >
                 Selecionar Arquivo JASON
               </button>
@@ -1192,7 +1226,7 @@ DIRETRIZ MANDATÓRIA:
                 <button
                   type="button"
                   onClick={handleDownloadJsonWithReactivation}
-                  className="px-4 py-2 bg-[#F26522] hover:bg-orange-600 text-white font-bold cursor-pointer border-none text-xs transition-colors text-left"
+                  className="px-4 py-2 bg-exed-accent hover:bg-exed-accent-strong text-white font-bold cursor-pointer border-none text-xs transition-colors text-left"
                 >
                   Baixar JASON Completo
                 </button>
@@ -1580,7 +1614,7 @@ DIRETRIZ MANDATÓRIA:
               )}
               <button
                 type="submit"
-                className="px-5 py-2 bg-[#0B2240] hover:bg-[#F26522] text-white font-bold cursor-pointer border-none text-xs transition-colors shadow-sm"
+                className="px-5 py-2 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs transition-colors shadow-sm"
               >
                 {editingProjectId ? 'Salvar Alterações do Projeto' : 'Salvar Novo Projeto SAP'}
               </button>
@@ -1617,7 +1651,7 @@ DIRETRIZ MANDATÓRIA:
                     <tr
                       key={p.id}
                       className={`hover:bg-slate-50 transition-colors ${
-                        isBeingEdited ? 'bg-amber-50 border-l-4 border-l-[#F26522]' : ''
+                        isBeingEdited ? 'bg-amber-50 border-l-4 border-l-exed-accent' : ''
                       }`}
                     >
                       <td className="p-2 border border-slate-200 font-mono font-bold text-slate-900">
@@ -1688,7 +1722,7 @@ DIRETRIZ MANDATÓRIA:
                           <button
                             type="button"
                             onClick={() => handleStartEditProject(p)}
-                            className="text-[#0B2240] hover:text-[#F26522] font-bold underline cursor-pointer bg-transparent border-none text-[11px]"
+                            className="text-[#0B2240] hover:text-exed-accent font-bold underline cursor-pointer bg-transparent border-none text-[11px]"
                           >
                             Editar
                           </button>
@@ -1784,12 +1818,12 @@ DIRETRIZ MANDATÓRIA:
                   value={migrationLink}
                   onChange={e => handleUpdateMigrationLink(e.target.value)}
                   placeholder=""
-                  className="flex-1 p-2 border border-slate-300 text-xs font-mono bg-white text-slate-900 focus:outline-none focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522]"
+                  className="flex-1 p-2 border border-slate-300 text-xs font-mono bg-white text-slate-900 focus:outline-none focus:border-exed-accent focus:ring-1 focus:ring-exed-accent"
                 />
                 <button
                   type="button"
                   onClick={handleSaveMigrationLink}
-                  className="px-4 py-2 bg-[#0B2240] hover:bg-[#F26522] text-white font-bold cursor-pointer border-none text-xs transition-colors whitespace-nowrap"
+                  className="px-4 py-2 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs transition-colors whitespace-nowrap"
                 >
                   Salvar
                 </button>
@@ -1872,7 +1906,14 @@ DIRETRIZ MANDATÓRIA:
                   </button>
                 </div>
                 <div className="text-[10px] text-slate-500 mt-1">
-                  Cabeçalho aceito: <code className="bg-slate-100 px-1 py-0.5">x-api-key: {claudeApiKey}</code> ou <code className="bg-slate-100 px-1 py-0.5">Authorization: Bearer {claudeApiKey}</code>
+                  Cabeçalho aceito: <code className="bg-slate-100 px-1 py-0.5">x-api-key: &lt;sua chave&gt;</code> ou <code className="bg-slate-100 px-1 py-0.5">Authorization: Bearer &lt;sua chave&gt;</code>
+                  {!hasStoredApiKey() && (
+                    <span className="block mt-1.5 p-2 bg-amber-50 border border-amber-300 text-amber-900 font-semibold">
+                      Nenhuma chave configurada neste navegador. Cole acima a mesma chave definida na
+                      variável de ambiente EXED_API_KEY da Vercel. Sem ela, salvar dados pela tela
+                      falha com 401 — leitura do dashboard continua funcionando.
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1945,7 +1986,7 @@ DIRETRIZ MANDATÓRIA:
                 value={claudePrompt}
                 onChange={e => setClaudePrompt(e.target.value)}
                 rows={6}
-                className="w-full p-2 border border-slate-300 font-mono text-xs text-slate-900 bg-white focus:outline-none focus:border-[#F26522] focus:ring-1 focus:ring-[#F26522] leading-relaxed resize-y"
+                className="w-full p-2 border border-slate-300 font-mono text-xs text-slate-900 bg-white focus:outline-none focus:border-exed-accent focus:ring-1 focus:ring-exed-accent leading-relaxed resize-y"
               />
             </div>
           </div>

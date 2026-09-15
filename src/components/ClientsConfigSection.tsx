@@ -198,7 +198,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
             <button
               type="button"
               onClick={() => setIsAddingNew(true)}
-              className="px-3 py-1.5 bg-[#0B2240] hover:bg-[#F26522] text-white font-bold text-xs cursor-pointer border-none transition-colors flex items-center gap-1"
+              className="px-3 py-1.5 bg-[#0B2240] hover:bg-exed-accent text-white font-bold text-xs cursor-pointer border-none transition-colors flex items-center gap-1"
             >
               Novo cliente
             </button>
@@ -267,7 +267,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
                   type="file"
                   accept="image/png, image/jpeg, image/svg+xml, image/webp"
                   onChange={e => handleFileUpload(e)}
-                  className="text-xs file:mr-2 file:py-1 file:px-2.5 file:border-0 file:text-xs file:font-semibold file:bg-[#0B2240] file:text-white hover:file:bg-[#F26522] cursor-pointer"
+                  className="text-xs file:mr-2 file:py-1 file:px-2.5 file:border-0 file:text-xs file:font-semibold file:bg-[#0B2240] file:text-white hover:file:bg-exed-accent cursor-pointer"
                 />
                 <span className="text-[11px] text-slate-500">ou informe uma URL:</span>
               </div>
@@ -302,7 +302,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 bg-[#0B2240] hover:bg-[#F26522] text-white text-xs font-bold cursor-pointer border-none transition-colors"
+              className="px-4 py-1.5 bg-[#0B2240] hover:bg-exed-accent text-white text-xs font-bold cursor-pointer border-none transition-colors"
             >
               Salvar Cliente
             </button>
@@ -367,7 +367,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
                 <button
                   type="button"
                   onClick={() => triggerUploadForClient(editingClient.id)}
-                  className="px-3 py-1.5 bg-[#0B2240] hover:bg-[#F26522] text-white text-xs font-bold cursor-pointer border-none transition-colors"
+                  className="px-3 py-1.5 bg-[#0B2240] hover:bg-exed-accent text-white text-xs font-bold cursor-pointer border-none transition-colors"
                 >
                   Selecionar Imagem PNG do Computador
                 </button>
@@ -403,7 +403,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 bg-[#0B2240] hover:bg-[#F26522] text-white text-xs font-bold cursor-pointer border-none transition-colors"
+              className="px-4 py-1.5 bg-[#0B2240] hover:bg-exed-accent text-white text-xs font-bold cursor-pointer border-none transition-colors"
             >
               Salvar Alterações
             </button>
