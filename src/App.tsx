@@ -57,7 +57,9 @@ export default function App() {
     } catch {
       // ignore
     }
-    return INITIAL_CLIENTS;
+    // Vazio, não a lista de demonstração. Os clientes reais vêm do servidor.
+    // INITIAL_CLIENTS só é usado pelo botão "restaurar demonstração".
+    return [];
   });
 
   const [projects, setProjects] = useState<SapProjectFinancial[]>(() => {
@@ -67,23 +69,16 @@ export default function App() {
       const saved = localStorage.getItem('vmo_exed_projects_v5');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          if (parsed.length === 0) return [];
-          return parsed.map((p: any) => {
-            const initial = INITIAL_PROJECTS.find(init => init.id === p.id);
-            return {
-              ...initial,
-              ...p,
-              reimbursableExpenseTotal: p.reimbursableExpenseTotal ?? initial?.reimbursableExpenseTotal ?? 25000,
-              crValue: p.hasOpenCr ? (p.crValue ?? initial?.crValue ?? 60000) : undefined
-            };
-          });
-        }
+        // Sem merge com INITIAL_PROJECTS: essa mesclagem completava projetos
+        // reais com valores da demonstração (reembolsável 25000, CR 60000),
+        // e o número fictício aparecia como se fosse do cliente.
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {
       // ignore
     }
-    return INITIAL_PROJECTS;
+    // Vazio, não a demonstração. Os projetos reais vêm da migração.
+    return [];
   });
 
   const [widgets, setWidgets] = useState<DashboardWidgetConfig[]>(() => {

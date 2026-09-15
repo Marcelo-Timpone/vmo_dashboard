@@ -320,27 +320,52 @@ migração por completo (não conseguir acessar a pasta, arquivo corrompido).`;
 export const INSTRUCOES_VERSAO_ATUAL = 2;
 
 const META_RECEITA_DE_FABRICA = 120000000;
+
+/**
+ * Textos que sabidamente saíram de fábrica e podem ser substituídos sem perda.
+ * Acrescente aqui a íntegra de qualquer padrão antigo que venha a existir —
+ * nunca troque isto por uma heurística de palavras-chave.
+ */
+const PADROES_DE_FABRICA_CONHECIDOS: string[] = [
+  DEFAULT_INSTRUCOES_PREENCHIMENTO
+];
 const META_MARGEM_DE_FABRICA = 24;
 
-function pareceInstrucaoDeFabricaAntiga(texto: string): boolean {
+function instrucoesSaoDeFabrica(texto: string): boolean {
+  // Só reconhece texto VAZIO ou idêntico a um padrão de fábrica conhecido.
+  //
+  // A versão anterior desta função usava heurística ("não contém MIRROR ACTUAL
+  // ⇒ é antigo"). Isso estava ERRADO e era destrutivo: a instalação em produção
+  // tinha 17 mil caracteres de instruções escritas à mão, mais detalhadas que o
+  // padrão, e a heurística as classificava como "de fábrica" — o primeiro
+  // loadState() teria apagado todas.
+  //
+  // REGRA: na dúvida, PRESERVAR. Instrução escrita por gente vale mais que
+  // padrão gerado. Se o texto não for reconhecido, ele fica como está e o
+  // console avisa que existe uma versão nova disponível.
   if (!texto || !texto.trim()) return true;
-  // A versão nova é reconhecível por estes marcadores. Se faltarem os dois, o
-  // texto é anterior à atualização.
-  return !texto.includes('MIRROR ACTUAL') && !texto.includes('Project ID (S4 Public Exed)');
+  return PADROES_DE_FABRICA_CONHECIDOS.some(p => p.trim() === texto.trim());
 }
 
 function migrarEstadoCarregado(state: ServerVmoState): ServerVmoState {
   const versao = state.instrucoesVersao ?? 0;
 
-  if (versao < INSTRUCOES_VERSAO_ATUAL && pareceInstrucaoDeFabricaAntiga(state.instrucoesPreenchimento)) {
-    console.info(
-      '[vmoState] Instruções gravadas eram da versão antiga de fábrica — substituídas pela versão ' +
-        INSTRUCOES_VERSAO_ATUAL +
-        '.'
-    );
-    state.instrucoesPreenchimento = DEFAULT_INSTRUCOES_PREENCHIMENTO;
+  if (versao < INSTRUCOES_VERSAO_ATUAL) {
+    if (instrucoesSaoDeFabrica(state.instrucoesPreenchimento)) {
+      console.info('[vmoState] Instruções de fábrica substituídas pela versão ' + INSTRUCOES_VERSAO_ATUAL + '.');
+      state.instrucoesPreenchimento = DEFAULT_INSTRUCOES_PREENCHIMENTO;
+      state.instrucoesVersao = INSTRUCOES_VERSAO_ATUAL;
+    } else {
+      // Texto customizado: NÃO é tocado, e a versão NÃO é marcada como
+      // atualizada — assim este aviso continua aparecendo até alguém decidir
+      // conscientemente o que fazer.
+      console.warn(
+        '[vmoState] As instruções gravadas foram personalizadas e NÃO foram alteradas. ' +
+          'Existe uma versão padrão mais nova disponível; revise e mescle manualmente em ' +
+          'Configurações > Instruções, se fizer sentido.'
+      );
+    }
   }
-  state.instrucoesVersao = INSTRUCOES_VERSAO_ATUAL;
 
   const cfg: any = state.containerSettings;
   if (cfg) {
@@ -366,8 +391,11 @@ function buildDefaultState(): ServerVmoState {
     instrucoesPreenchimento: DEFAULT_INSTRUCOES_PREENCHIMENTO,
     instrucoesVersao: INSTRUCOES_VERSAO_ATUAL,
     localDosDados: 'https://uh924mhkawsbhi.sharepoint.com/:f:/s/PMO-FernandoAlineeYara/IgBh685D7ekuSboCSaMizjfxAa7INRhp9fYLo6OoVXLlq-U?e=xvwrvt',
-    projects: INITIAL_PROJECTS,
-    clients: INITIAL_CLIENTS,
+    // Estado inicial VAZIO. Antes nascia com os 15 projetos de demonstração
+    // (Petrobras, Vale, Ambev...), que apareciam no relatório executivo como se
+    // fossem clientes reais. Os dados reais entram pela migração das RSE.
+    projects: [],
+    clients: [],
     widgets: INITIAL_WIDGETS,
     sharePointLinks: INITIAL_SHAREPOINT_LINKS,
     containerSettings: DEFAULT_CONTAINER_SETTINGS,
