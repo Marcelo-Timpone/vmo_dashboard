@@ -2,6 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Maximize2, Minimize2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
 import { FilterSolutionType } from './LateralControls';
+import { useCatalogo } from '../context/CatalogoContext';
+import { filtrarProjetosPorPortfolio } from '../utils/portfolio';
 import { ClientLogo } from './ClientLogo';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { ContainerSlot } from './ContainerSlot';
@@ -34,23 +36,17 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
   isPmo = false,
   monthlyHistory = []
 }) => {
+  const rot = useCatalogo();
   // State for expanding/reducing any of the 4 containers to full screen
   const [expandedContainer, setExpandedContainer] = useState<1 | 2 | 3 | 4 | null>(null);
   // Sub-filter for ALM container: 'todos' or 'sem_alm' (defaults to 'todos' to show all projects)
   const [almFilter, setAlmFilter] = useState<'todos' | 'sem_alm'>('todos');
 
-  // Filter projects by selected SAP solutions
-  const filteredProjects = useMemo(() => {
-    if (selectedFilters.includes('TODOS') || selectedFilters.length === 0) {
-      return projects;
-    }
-    return projects.filter(p => {
-      return selectedFilters.some(filter => {
-        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
-        return p.solution === filter;
-      });
-    });
-  }, [projects, selectedFilters]);
+  // Filtra por frente e solução (itens do mesmo grupo somam; grupos se cruzam)
+  const filteredProjects = useMemo(
+    () => filtrarProjetosPorPortfolio(projects, selectedFilters, rot.catalogo),
+    [projects, selectedFilters, rot.catalogo]
+  );
 
   // Client monogram helper
   const getClientInitials = (name: string) => {
@@ -233,7 +229,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                                   {p.client}
                                 </span>
                                 <span className={`text-[9px] ${textMuted} font-medium`}>
-                                  {p.solution}
+                                  {rot.solucao(p.solution)}
                                 </span>
                               </div>
                             </div>
@@ -395,7 +391,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                                   {p.client}
                                 </span>
                                 <span className={`text-[9px] ${textMuted} font-medium`}>
-                                  {p.solution}
+                                  {rot.solucao(p.solution)}
                                 </span>
                               </div>
                             </div>
@@ -584,7 +580,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                                     {p.client}
                                   </span>
                                   <span className={`text-[9px] ${textMuted}`}>
-                                    {p.solution} &bull; {p.name}
+                                    {rot.solucao(p.solution)} &bull; {p.name}
                                   </span>
                                 </div>
                               </div>
@@ -711,7 +707,7 @@ export const GeneralInfoDashboard: React.FC<GeneralInfoDashboardProps> = ({
                                   {p.client}
                                 </span>
                                 <span className={`text-[9px] ${textMuted} font-medium`}>
-                                  {p.solution}
+                                  {rot.solucao(p.solution)}
                                 </span>
                               </div>
                             </div>

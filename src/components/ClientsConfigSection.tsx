@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { ClientInfo, SapProjectFinancial, SolutionType } from '../types';
+import { useCatalogo } from '../context/CatalogoContext';
 import { ClientLogo } from './ClientLogo';
 
 interface ClientsConfigSectionProps {
@@ -17,6 +18,7 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
   onUpdateProjects,
   onShowMessage
 }) => {
+  const rot = useCatalogo();
   const [searchTerm, setSearchTerm] = useState('');
   const [editingClient, setEditingClient] = useState<ClientInfo | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
@@ -243,17 +245,15 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
               />
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Frente Padrão:</label>
+              <label className="block font-semibold text-slate-700 mb-1">Solução padrão:</label>
               <select
                 value={newClient.defaultSolution}
                 onChange={e => setNewClient({ ...newClient, defaultSolution: e.target.value as SolutionType })}
                 className="w-full p-1.5 border border-slate-300 bg-white text-slate-900 text-xs"
               >
-                <option value="RISE">RISE (S/4HANA Cloud)</option>
-                <option value="GROW">GROW with SAP</option>
-                <option value="SCP (IBP)">SCP (IBP)</option>
-                <option value="Fábrica">Fábrica de Software</option>
-                <option value="SCE">SCE (EWM / TM)</option>
+                {rot.catalogo.solucoes.map(s => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -345,17 +345,15 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
               />
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 mb-1">Frente Padrão:</label>
+              <label className="block font-semibold text-slate-700 mb-1">Solução padrão:</label>
               <select
                 value={editingClient.defaultSolution || 'RISE'}
                 onChange={e => setEditingClient({ ...editingClient, defaultSolution: e.target.value as SolutionType })}
                 className="w-full p-1.5 border border-slate-300 bg-white text-slate-900 text-xs"
               >
-                <option value="RISE">RISE (S/4HANA Cloud)</option>
-                <option value="GROW">GROW with SAP</option>
-                <option value="SCP (IBP)">SCP (IBP)</option>
-                <option value="Fábrica">Fábrica de Software</option>
-                <option value="SCE">SCE (EWM / TM)</option>
+                {rot.catalogo.solucoes.map(s => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -473,10 +471,10 @@ export const ClientsConfigSection: React.FC<ClientsConfigSectionProps> = ({
                     {client.shortName}
                   </td>
 
-                  {/* Solution Front */}
+                  {/* Solução padrão */}
                   <td className="p-2 border border-slate-200">
                     <span className="px-2 py-0.5 rounded-xs text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-300">
-                      {client.defaultSolution || 'RISE'}
+                      {client.defaultSolution ? rot.solucao(client.defaultSolution) : '—'}
                     </span>
                   </td>
 

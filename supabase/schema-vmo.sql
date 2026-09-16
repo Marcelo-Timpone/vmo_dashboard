@@ -237,3 +237,104 @@ ORDER BY tablename;
 -- SUPABASE_SERVICE_ROLE_KEY e AUTH_JWT_SECRET nunca levam prefixo VITE_ —
 -- esse prefixo faz o Vite embutir o valor no bundle do navegador.
 -- =============================================================================
+
+
+-- =============================================================================
+-- VERSÃO 3 (16/09/2026) — proteção do estado, auditoria e registro de IDs
+-- Já aplicada no projeto vmo_dashboard (migração vmo_v3_protecao_estado_registro_ids).
+-- =============================================================================
+create table if not exists public.vmo_app_state_auditoria (
+  id bigserial primary key,
+  ocorrido_em timestamptz not null default now(),
+  atualizado_por text,
+  escrita_verificada boolean not null,
+  bloqueios text[] not null default '{}',
+  projetos_antes integer,
+  projetos_depois integer,
+  clientes_antes integer,
+  clientes_depois integer,
+  meses_antes integer,
+  meses_depois integer
+);
+alter table public.vmo_app_state_auditoria enable row level security;
+
+create or replace function public.vmo_tamanho_lista(j jsonb)
+returns integer language sql immutable set search_path = public as $$
+  select case when jsonb_typeof(j) = 'array' then jsonb_array_length(j) else null end
+$$;
+
+-- a) Gravação sem carimbo (escritaVerificadaEm = lastSaved) vem de versão antiga
+--    do app: projetos, clientes, histórico, catálogo e instruções não mudam.
+-- b) Lista com conteúdo só vira lista vazia com limpezaConfirmada = true.
+create or replace function public.vmo_protege_estado()
+returns trigger language plpgsql set search_path = public as $$
+declare
+  verificada boolean := coalesce(new.state_json->>'escritaVerificadaEm', '') <> ''
+                        and new.state_json->>'escritaVerificadaEm' = new.state_json->>'lastSaved';
+  limpeza boolean := coalesce(new.state_json->>'limpezaConfirmada', '') = 'true';
+  chave text;
+  bloqueios text[] := '{}';
+  protegidas text[] := array['projects','clients','monthlyHistory','projetosSemAtualizacao','catalogoPortfolio','instrucoesPreenchimento','instrucoesVersao','instrucoesPreenchimentoBackup'];
+  listas text[] := array['projects','clients','monthlyHistory','projetosSemAtualizacao'];
+begin
+  if not verificada then
+    foreach chave in array protegidas loop
+      if (old.state_json -> chave) is distinct from (new.state_json -> chave) then
+        if old.state_json ? chave then
+          new.state_json := jsonb_set(new.state_json, array[chave], old.state_json -> chave, true);
+        else
+          new.state_json := new.state_json - chave;
+        end if;
+        bloqueios := bloqueios || ('versao_antiga:' || chave);
+      end if;
+    end loop;
+  elsif not limpeza then
+    foreach chave in array listas loop
+      if coalesce(public.vmo_tamanho_lista(old.state_json -> chave), 0) > 0
+         and coalesce(public.vmo_tamanho_lista(new.state_json -> chave), 0) = 0 then
+        new.state_json := jsonb_set(new.state_json, array[chave], old.state_json -> chave, true);
+        bloqueios := bloqueios || ('lista_vazia:' || chave);
+      end if;
+    end loop;
+  end if;
+  new.state_json := new.state_json - 'limpezaConfirmada';
+  insert into public.vmo_app_state_auditoria (
+    atualizado_por, escrita_verificada, bloqueios,
+    projetos_antes, projetos_depois, clientes_antes, clientes_depois, meses_antes, meses_depois
+  ) values (
+    new.state_json->>'updatedBy', verificada, bloqueios,
+    public.vmo_tamanho_lista(old.state_json->'projects'), public.vmo_tamanho_lista(new.state_json->'projects'),
+    public.vmo_tamanho_lista(old.state_json->'clients'), public.vmo_tamanho_lista(new.state_json->'clients'),
+    public.vmo_tamanho_lista(old.state_json->'monthlyHistory'), public.vmo_tamanho_lista(new.state_json->'monthlyHistory')
+  );
+  return new;
+end
+$$;
+
+drop trigger if exists trg_vmo_protege_estado on public.vmo_app_state;
+create trigger trg_vmo_protege_estado
+  before update on public.vmo_app_state
+  for each row execute function public.vmo_protege_estado();
+
+-- Registro de projetos pelo Project ID (S4 Public Exed); frente e solução nas chaves fixas.
+create table if not exists public.vmo_projetos_ids (
+  chave text primary key,
+  project_id_s4 text unique,
+  id_ausente boolean not null default false,
+  nome text,
+  cliente text,
+  frente text check (frente is null or frente in ('RISE','GROW','IBP','SUPPLY_CHAIN','FABRICA')),
+  solucao text check (solucao is null or solucao in ('RISE','GROW','SCE','SCP','FSW','DSC')),
+  gerente_projeto text,
+  gerente_portfolio text,
+  situacao text check (situacao in ('ativo','encerrado','sem_atualizacao','fora_do_escopo')),
+  ultima_semana date,
+  ultimo_status_date date,
+  arquivo_origem text,
+  observacao text,
+  atualizado_em timestamptz not null default now()
+);
+alter table public.vmo_projetos_ids enable row level security;
+
+alter table public.vmo_migracao_arquivos add column if not exists project_id_s4 text;
+alter table public.vmo_migracao_arquivos add column if not exists id_ausente boolean not null default false;

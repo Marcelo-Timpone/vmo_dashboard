@@ -177,3 +177,14 @@ sessão JWT que já existe em `lib/auth.ts` e então remover a exceção.
 7. **Colar a chave no webapp**, em *Configurações > API do Claude*. Sem isso, o
    PMO consegue ver o dashboard mas não consegue salvar alterações pela tela
    (erro 401).
+
+## Novidades da versão 3 (16/09/2026)
+| Ferramenta | Mudança |
+|---|---|
+| `ler_estado_vmo` | Novas seções: `projetos_sem_atualizacao`, `catalogo` (frentes e soluções) e `instrucoes` (manual). |
+| `substituir_projetos` | Converte solução e frente para as chaves, calcula a frente pelo responsável, cadastra os clientes que faltam e devolve `avisos`, `ignorados` e `bloqueados_pelo_banco`. Lista vazia só apaga com `confirmarLimpeza: true`. |
+| `upsert_historico_mensal` | Snapshots aceitam `front`. |
+| `atualizar_estado_vmo` | Aceita `catalogoPortfolio` e `projetosSemAtualizacao`. |
+| `registrar_projetos_sem_atualizacao` | Nova. Registra os projetos cujo GP não atualizou a RSE no mês. |
+
+Se o Supabase recusar uma gravação, a ferramenta agora devolve erro (antes respondia "sucesso").

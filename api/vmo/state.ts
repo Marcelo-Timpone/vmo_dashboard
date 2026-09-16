@@ -26,7 +26,11 @@ export default async function handler(req: any, res: any) {
         'sempre a lista completa, senão apaga o resto), enquanto upsert_historico_mensal faz merge ' +
         'por monthKey e é seguro para carga incremental. ' +
         'Campo sem dado deve ser OMITIDO, nunca enviado como zero: zero vira variação real no ' +
-        'relatório executivo, ausente vira "—".',
+        'relatório executivo, ausente vira "—". ' +
+        'Versão 3 do manual: a solução vem do Project Portfolio e a frente do gerente de portfólio responsável (catalogo_portfolio), ' +
+        'projectIdS4 obrigatório, clientes cadastrados em toda migração, projetos sem atualização ' +
+        'do GP ficam fora do mês e vão para projetos_sem_atualizacao, e toda gravação termina com ' +
+        'conferência no banco.',
       INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento || '',
       LOCAL_DOS_DADOS: state.localDosDados || '',
       resumo_executivo: {
@@ -50,6 +54,8 @@ export default async function handler(req: any, res: any) {
         layout_paginas: state.pageLayout,
         layout_conteineres: state.containerLayout,
         historico_mensal: state.monthlyHistory,
+        projetos_sem_atualizacao: state.projetosSemAtualizacao || [],
+        catalogo_portfolio: state.catalogoPortfolio,
         ultima_atualizacao: state.lastSaved,
         atualizado_por: state.updatedBy || 'sistema'
       },
@@ -64,6 +70,9 @@ export default async function handler(req: any, res: any) {
       pageLayout: state.pageLayout,
       containerLayout: state.containerLayout,
       monthlyHistory: state.monthlyHistory,
+      projetosSemAtualizacao: state.projetosSemAtualizacao || [],
+      catalogoPortfolio: state.catalogoPortfolio,
+      instrucoesPreenchimento: state.instrucoesPreenchimento || '',
       lastSaved: state.lastSaved
     });
   }
@@ -72,18 +81,39 @@ export default async function handler(req: any, res: any) {
     try {
       const state = await loadState();
       const body = req.body || {};
+      const origemWebapp = String(req.headers?.['x-vmo-client'] || '').toLowerCase() === 'webapp';
 
-      applyIncomingUpdates(state, body);
-      state.updatedBy = req.headers?.['x-api-key'] ? 'claude-api' : 'usuario-webapp';
+      // Concorrência: o webapp envia a data da versão que carregou. Se o
+      // servidor mudou depois disso (ex.: migração do Claude), a gravação é
+      // recusada e a tela recarrega os dados, em vez de sobrescrevê-los.
+      const base = typeof body.baseLastSaved === 'string' ? body.baseLastSaved : '';
+      if (base && state.lastSaved && base < state.lastSaved) {
+        return res.status(409).json({
+          sucesso: false,
+          conflito: true,
+          mensagem: 'Os dados do servidor mudaram depois que esta tela foi carregada. Recarregue para ver a versão atual.',
+          ultima_atualizacao: state.lastSaved
+        });
+      }
 
-      await saveState(state);
+      const resultado = applyIncomingUpdates(state, body);
+      state.updatedBy = origemWebapp ? 'usuario-webapp' : req.headers?.['x-api-key'] ? 'claude-api' : 'usuario-webapp';
+
+      const gravacao = await saveState(state);
 
       return res.status(200).json({
         sucesso: true,
-        mensagem: 'Estado do VMO atualizado com sucesso no webapp.',
+        mensagem: gravacao.bloqueios.length
+          ? 'Gravação parcial: o banco manteve os valores atuais de ' + gravacao.bloqueios.join(', ') + '.'
+          : 'Estado do VMO atualizado com sucesso no webapp.',
         INSTRUCOES_PARA_PREENCHIMENTO: state.instrucoesPreenchimento,
         LOCAL_DOS_DADOS: state.localDosDados,
         total_projetos: state.projects.length,
+        total_clientes: (state.clients || []).length,
+        avisos: resultado.avisos,
+        ignorados: resultado.ignorados,
+        clientes_cadastrados: resultado.clientesCadastrados,
+        bloqueados_pelo_banco: gravacao.bloqueios,
         ultima_atualizacao: state.lastSaved
       });
     } catch (err: any) {

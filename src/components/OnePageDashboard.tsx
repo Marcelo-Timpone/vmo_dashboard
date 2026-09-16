@@ -8,6 +8,8 @@ import {
 } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
+import { useCatalogo } from '../context/CatalogoContext';
+import { filtrarProjetosPorPortfolio } from '../utils/portfolio';
 import { ClientLogo } from './ClientLogo';
 import { ContainerSlot } from './ContainerSlot';
 import { MoMBadge, MoMEmpty } from './MoMBadge';
@@ -44,23 +46,17 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
   isPmo = false,
   monthlyHistory = []
 }) => {
+  const rot = useCatalogo();
   // `isLight` / tema claro: mantido como código morto (ver T9 — tema fixo Neon).
   const isLight = theme === 'light';
   const [hoveredBurnupMonth, setHoveredBurnupMonth] = useState<number | null>(null);
   const [expandedMetric, setExpandedMetric] = useState<KpiMetricDefinition | null>(null);
 
-  // Filter projects by selected SAP solutions
-  const filteredProjects = useMemo(() => {
-    if (selectedFilters.includes('TODOS') || selectedFilters.length === 0) {
-      return projects;
-    }
-    return projects.filter(p => {
-      return selectedFilters.some(filter => {
-        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
-        return p.solution === filter;
-      });
-    });
-  }, [projects, selectedFilters]);
+  // Filtra por frente e solução (itens do mesmo grupo somam; grupos se cruzam)
+  const filteredProjects = useMemo(
+    () => filtrarProjetosPorPortfolio(projects, selectedFilters, rot.catalogo),
+    [projects, selectedFilters, rot.catalogo]
+  );
 
   // ---------------------------------------------------------------------------
   // O histórico mensal é AGREGADO DO PORTFÓLIO INTEIRO — não tem dimensão de
@@ -175,12 +171,16 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     const clientMap = new Map<string, { client: string; logoUrl?: string; solution: string; totalMargin: number; count: number }>();
     filteredProjects.forEach(p => {
       const existing = clientMap.get(p.client) || { client: p.client, logoUrl: p.clientLogo, solution: p.solution, totalMargin: 0, count: 0 };
-      existing.totalMargin += p.marginPercent;
-      existing.count += 1;
+      // Projeto sem margem (ex.: receita com erro na RSE) não entra na média.
+      if (typeof p.marginPercent === 'number' && Number.isFinite(p.marginPercent)) {
+        existing.totalMargin += p.marginPercent;
+        existing.count += 1;
+      }
       if (!existing.logoUrl && p.clientLogo) existing.logoUrl = p.clientLogo;
       clientMap.set(p.client, existing);
     });
     return Array.from(clientMap.values())
+      .filter(c => c.count > 0)
       .map(c => ({
         client: c.client,
         logoUrl: c.logoUrl,
@@ -194,8 +194,10 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
   // Margem média ponderada do estado atual dos projetos (mês corrente em curso)
   const currentAvgMargin = useMemo(() => {
     if (filteredProjects.length === 0) return null;
-    const sum = filteredProjects.reduce((acc, p) => acc + p.marginPercent, 0);
-    return sum / filteredProjects.length;
+    const comMargem = filteredProjects.filter(p => typeof p.marginPercent === 'number' && Number.isFinite(p.marginPercent));
+    if (comMargem.length === 0) return null;
+    const sum = comMargem.reduce((acc, p) => acc + p.marginPercent, 0);
+    return sum / comMargem.length;
   }, [filteredProjects]);
 
   // ---------------------------------------------------------------------------
@@ -1033,7 +1035,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                             ? 'bg-slate-100 text-slate-700 border-slate-200'
                             : 'bg-[#071626] text-slate-300 border-slate-700'
                         }`}>
-                          {c.solution}
+                          {rot.solucao(c.solution)}
                         </span>
                       </td>
                       <td className={`py-1 px-2 text-right font-mono font-bold text-[11px] ${
@@ -1084,7 +1086,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                             ? 'bg-slate-100 text-slate-700 border-slate-200'
                             : 'bg-[#071626] text-slate-300 border-slate-700'
                         }`}>
-                          {c.solution}
+                          {rot.solucao(c.solution)}
                         </span>
                       </td>
                       <td className={`py-1 px-2 text-right font-mono font-bold text-[11px] ${

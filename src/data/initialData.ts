@@ -197,7 +197,7 @@ const RAW_CLIENTS: ClientInfo[] = [
     shortName: 'Ambev',
     logoUrl: '/assets/logos/ambev.png',
     primaryColor: '#002060',
-    defaultSolution: 'SCP (IBP)',
+    defaultSolution: 'SCP',
     notes: 'Bebidas e Bens de Consumo'
   },
   {
@@ -206,7 +206,7 @@ const RAW_CLIENTS: ClientInfo[] = [
     shortName: 'Klabin',
     logoUrl: '/assets/logos/klabin.png',
     primaryColor: '#006E3C',
-    defaultSolution: 'Fábrica',
+    defaultSolution: 'FSW',
     notes: 'Embalagens e Celulose Integrada'
   },
   {
@@ -233,7 +233,7 @@ const RAW_CLIENTS: ClientInfo[] = [
     shortName: 'Natura',
     logoUrl: '/assets/logos/natura.png',
     primaryColor: '#EB6E28',
-    defaultSolution: 'Fábrica',
+    defaultSolution: 'FSW',
     notes: 'Cosméticos e Sustentabilidade'
   },
   {
@@ -278,7 +278,7 @@ const RAW_CLIENTS: ClientInfo[] = [
     shortName: 'Braskem',
     logoUrl: '/assets/logos/braskem.png',
     primaryColor: '#0064AA',
-    defaultSolution: 'SCP (IBP)',
+    defaultSolution: 'SCP',
     notes: 'Resinas Termoplásticas e Química'
   },
   {
@@ -287,7 +287,7 @@ const RAW_CLIENTS: ClientInfo[] = [
     shortName: 'Grupo Boticário',
     logoUrl: '/assets/logos/boticario.png',
     primaryColor: '#0F4B4B',
-    defaultSolution: 'SCP (IBP)',
+    defaultSolution: 'SCP',
     notes: 'Fragrâncias, Beleza e Varejo Multicanal'
   },
   {
@@ -296,7 +296,7 @@ const RAW_CLIENTS: ClientInfo[] = [
     shortName: 'Embraer',
     logoUrl: '/assets/logos/embraer.png',
     primaryColor: '#0A2D6E',
-    defaultSolution: 'Fábrica',
+    defaultSolution: 'FSW',
     notes: 'Aviação Comercial, Executiva e Defesa'
   },
   {
@@ -532,7 +532,7 @@ const RAW_PROJECTS: SapProjectFinancial[] = [
     name: 'Planejamento Integrado Supply Chain (IBP)',
     client: 'Ambev Bebidas e Alimentos',
     clientLogo: '/assets/logos/ambev.png',
-    solution: 'SCP (IBP)',
+    solution: 'SCP',
     projectManager: 'Beatriz Lima',
     budgetPlanned: 1420000,
     budgetRealized: 1380000,
@@ -564,7 +564,7 @@ const RAW_PROJECTS: SapProjectFinancial[] = [
     name: 'IBP Demand & Supply Optimization',
     client: 'Braskem Petroquímica Global',
     clientLogo: '/assets/logos/braskem.png',
-    solution: 'SCP (IBP)',
+    solution: 'SCP',
     projectManager: 'Beatriz Lima',
     budgetPlanned: 1680000,
     budgetRealized: 1610000,
@@ -596,7 +596,7 @@ const RAW_PROJECTS: SapProjectFinancial[] = [
     name: 'SAP IBP S&OP Multi-Echelon',
     client: 'Grupo Boticário Beleza & Cosmética',
     clientLogo: '/assets/logos/boticario.png',
-    solution: 'SCP (IBP)',
+    solution: 'SCP',
     projectManager: 'Beatriz Lima',
     budgetPlanned: 1290000,
     budgetRealized: 1340000,
@@ -632,7 +632,7 @@ const RAW_PROJECTS: SapProjectFinancial[] = [
     name: 'Fábrica de Desenvolvimento ABAP e Fiori',
     client: 'Klabin Papel e Celulose',
     clientLogo: '/assets/logos/klabin.png',
-    solution: 'Fábrica',
+    solution: 'FSW',
     projectManager: 'Ricardo Silva',
     budgetPlanned: 760000,
     budgetRealized: 710000,
@@ -664,7 +664,7 @@ const RAW_PROJECTS: SapProjectFinancial[] = [
     name: 'Fábrica de Integrações SAP CPI / BTP',
     client: 'Natura Cosméticos',
     clientLogo: '/assets/logos/natura.png',
-    solution: 'Fábrica',
+    solution: 'FSW',
     projectManager: 'Ricardo Silva',
     budgetPlanned: 890000,
     budgetRealized: 860000,
@@ -696,7 +696,7 @@ const RAW_PROJECTS: SapProjectFinancial[] = [
     name: 'Fábrica Ágil de Extensões SAP BTP & IA',
     client: 'Embraer Aeroespacial e Defesa',
     clientLogo: '/assets/logos/embraer.png',
-    solution: 'Fábrica',
+    solution: 'FSW',
     projectManager: 'Ricardo Silva',
     budgetPlanned: 920000,
     budgetRealized: 880000,
@@ -947,6 +947,7 @@ export const INITIAL_CONTAINER_LAYOUT: ContainerLayoutConfig[] = [
   { id: 'pontos_atencao__detratores', pageKey: 'pontos_atencao', label: 'Projetos Detratores', order: 0, hidden: false },
   { id: 'pontos_atencao__cronogramas', pageKey: 'pontos_atencao', label: 'Aderência aos Cronogramas e Atrasos', order: 1, hidden: false },
   { id: 'pontos_atencao__documentacao', pageKey: 'pontos_atencao', label: 'Documentação Registrada ao PMO', order: 2, hidden: false },
+  { id: 'pontos_atencao__sem_atualizacao', pageKey: 'pontos_atencao', label: 'Projetos sem atualização do GP', order: 3, hidden: false },
 
   { id: 'informacoes_gerais__orcamento', pageKey: 'informacoes_gerais', label: 'Projetos com Maior Uso de Orçamento', order: 0, hidden: false },
   { id: 'informacoes_gerais__crs_abertos', pageKey: 'informacoes_gerais', label: 'CRs em Aberto', order: 1, hidden: false },
@@ -963,3 +964,4 @@ export const INITIAL_CONTAINER_LAYOUT: ContainerLayoutConfig[] = [
 // inventar números. É preenchido pela migração (Claude) ou manualmente em
 // Configurações > Layout do Dashboard > Histórico Mensal.
 export const INITIAL_MONTHLY_HISTORY: MonthlyKpiSnapshot[] = [];
+

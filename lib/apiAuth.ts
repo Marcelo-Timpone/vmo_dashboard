@@ -119,7 +119,7 @@ export function setCorsHeaders(res: any): void {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-api-key, X-API-Key'
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-api-key, X-API-Key, x-vmo-client'
   );
 }
 

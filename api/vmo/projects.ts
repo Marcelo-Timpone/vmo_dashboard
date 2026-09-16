@@ -1,5 +1,6 @@
 import { handlePreflight, isAuthorized, sendUnauthorized } from '../../lib/apiAuth.js';
 import { loadState, saveState } from '../../lib/vmoState.js';
+import { normalizarFrente, normalizarSolucao } from '../../src/utils/portfolio.js';
 
 export default async function handler(req: any, res: any) {
   if (handlePreflight(req, res)) return;
@@ -9,8 +10,13 @@ export default async function handler(req: any, res: any) {
     const state = await loadState();
     let list = [...state.projects];
 
+    if (req.query?.front) {
+      const frente = normalizarFrente(String(req.query.front));
+      list = list.filter(p => p.front === frente);
+    }
     if (req.query?.solution) {
-      list = list.filter(p => p.solution?.toLowerCase() === String(req.query.solution).toLowerCase());
+      const solucao = normalizarSolucao(String(req.query.solution));
+      list = list.filter(p => normalizarSolucao(p.solution) === solucao);
     }
     if (req.query?.tag) {
       list = list.filter(p => p.trafficTag?.toLowerCase() === String(req.query.tag).toLowerCase());

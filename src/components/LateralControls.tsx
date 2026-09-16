@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, ChevronRight, Menu, Filter, Check } from 'lucide-react';
 import { AppTheme, DashboardPageKey, PageLayoutConfig } from '../types';
+import { FiltroPortfolio, filtroFrente, filtroSolucao } from '../utils/portfolio';
+import { useCatalogo } from '../context/CatalogoContext';
 
 export type { DashboardPageKey };
 
@@ -11,8 +13,9 @@ export const DASHBOARD_PAGES: { key: DashboardPageKey; label: string }[] = [
   { key: 'detalhamento_financeiro', label: 'Detalhamento financeiro' }
 ];
 
-export const FILTER_SOLUTIONS = ['TODOS', 'Fábrica', 'RISE', 'GROW', 'SCP', 'SCE'] as const;
-export type FilterSolutionType = (typeof FILTER_SOLUTIONS)[number];
+// Cada item do filtro é uma frente ("fr:CHAVE") ou uma solução ("sol:CHAVE").
+// Itens do mesmo grupo somam; frentes e soluções se cruzam.
+export type FilterSolutionType = FiltroPortfolio;
 
 interface LateralControlsProps {
   currentPage: DashboardPageKey;
@@ -31,6 +34,7 @@ export const LateralControls: React.FC<LateralControlsProps> = ({
   theme = 'neon',
   pages = DASHBOARD_PAGES
 }) => {
+  const rot = useCatalogo();
   // Navigation button collapse/expand state
   const [isNavPinned, setIsNavPinned] = useState(true);
   const [isNavHovered, setIsNavHovered] = useState(false);
@@ -67,6 +71,40 @@ export const LateralControls: React.FC<LateralControlsProps> = ({
 
     onFilterChange(updated);
   };
+
+  const renderOpcao = (item: FilterSolutionType, rotulo: string, exclusivo = false) => {
+    const isChecked = selectedFilters.includes(item);
+    return (
+      <label
+        key={item}
+        onClick={() => handleCheckboxToggle(item)}
+        className={`flex items-center gap-2.5 px-2.5 py-1 text-xs cursor-pointer transition-colors ${
+          isChecked
+            ? isLight
+              ? 'bg-sky-50 text-sky-900 font-semibold border-l-2 border-[#00D2FF]'
+              : 'bg-[#0E2847] text-white font-semibold border-l-2 border-[#00D2FF]'
+            : isLight
+            ? 'text-slate-700 hover:bg-slate-100'
+            : 'text-slate-300 hover:bg-[#0A1D33]'
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={() => {}} // tratado pelo clique no label
+          className="cursor-pointer accent-[#00D2FF]"
+        />
+        <span>{rotulo}</span>
+        {exclusivo && (
+          <span className={`text-[9px] ml-auto font-normal ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
+            Exclusivo
+          </span>
+        )}
+      </label>
+    );
+  };
+
+  const tituloGrupo = `text-[10px] font-bold uppercase tracking-wider pt-1 ${isLight ? 'text-slate-500' : 'text-slate-400'}`;
 
   return (
     <div className="fixed left-0 top-32 z-50 flex flex-col gap-2.5 items-start no-print select-none">
@@ -252,9 +290,9 @@ export const LateralControls: React.FC<LateralControlsProps> = ({
           </div>
         )}
 
-        {/* Popover container with 6 checkboxes */}
+        {/* Popover: frentes e soluções, combináveis */}
         {isFilterOpen && showFilterFull && (
-          <div className={`absolute left-full top-0 ml-2 w-56 p-3 shadow-2xl flex flex-col gap-2 z-50 border ${
+          <div className={`absolute left-full top-0 ml-2 w-64 max-h-[75vh] overflow-y-auto p-3 shadow-2xl flex flex-col gap-2 z-50 border ${
             isLight
               ? 'bg-white border-slate-300 text-slate-800'
               : 'bg-[#081728] border-[#1E436E] text-slate-100'
@@ -262,48 +300,26 @@ export const LateralControls: React.FC<LateralControlsProps> = ({
             <div className={`text-[10px] font-bold uppercase tracking-wider pb-1.5 border-b flex justify-between items-center ${
               isLight ? 'text-slate-600 border-slate-200' : 'text-slate-400 border-slate-800'
             }`}>
-              <span>Filtro de Solução SAP</span>
+              <span>Filtro por frente e solução</span>
               <span className="text-[9px] text-[#00D2FF]">Multi-seleção</span>
             </div>
 
-            <div className="space-y-1.5">
-              {FILTER_SOLUTIONS.map(sol => {
-                const isChecked = selectedFilters.includes(sol);
-                return (
-                  <label
-                    key={sol}
-                    onClick={() => handleCheckboxToggle(sol)}
-                    className={`flex items-center gap-2.5 px-2.5 py-1.5 text-xs cursor-pointer transition-colors ${
-                      isChecked
-                        ? isLight
-                          ? 'bg-sky-50 text-sky-900 font-semibold border-l-2 border-[#00D2FF]'
-                          : 'bg-[#0E2847] text-white font-semibold border-l-2 border-[#00D2FF]'
-                        : isLight
-                        ? 'text-slate-700 hover:bg-slate-100'
-                        : 'text-slate-300 hover:bg-[#0A1D33]'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => {}} // Handled by label click
-                      className="cursor-pointer accent-[#00D2FF]"
-                    />
-                    <span>{sol}</span>
-                    {sol === 'TODOS' && (
-                      <span className={`text-[9px] ml-auto font-normal ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>
-                        Exclusivo
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
+            <div className="space-y-1">{renderOpcao('TODOS', 'TODOS', true)}</div>
+
+            <div className={tituloGrupo}>Frentes</div>
+            <div className="space-y-1">
+              {rot.catalogo.frentes.map(f => renderOpcao(filtroFrente(f.key), f.label))}
+            </div>
+
+            <div className={tituloGrupo}>Soluções</div>
+            <div className="space-y-1">
+              {rot.catalogo.solucoes.map(sol => renderOpcao(filtroSolucao(sol.key), sol.label))}
             </div>
 
             <div className={`pt-2 border-t flex justify-between items-center text-[10px] ${
               isLight ? 'border-slate-200 text-slate-500' : 'border-slate-800 text-slate-400'
             }`}>
-              <span>Filtra as páginas</span>
+              <span>Frentes e soluções se combinam</span>
               <button
                 type="button"
                 onClick={() => onFilterChange(['TODOS'])}

@@ -16,10 +16,23 @@ import {
   UserSession,
   PageLayoutConfig,
   ContainerLayoutConfig,
-  MonthlyKpiSnapshot
+  MonthlyKpiSnapshot,
+  ProjetoSemAtualizacao,
+  CatalogoPortfolio,
+  FrenteConfig,
+  FrontType
 } from '../types';
 import { exportStateToJson, exportToExcel, exportToCsv, getJsonExportFilename } from '../utils/exportUtils';
 import { calculateVmoReferencePeriod } from '../utils/dateUtils';
+import { useCatalogo } from '../context/CatalogoContext';
+import {
+  DEFAULT_CATALOGO_PORTFOLIO,
+  definirFrente,
+  frenteEfetiva,
+  normalizarCatalogo,
+  normalizarFrente,
+  normalizarSolucao
+} from '../utils/portfolio';
 import {
   getStoredApiKey,
   setStoredApiKey,
@@ -34,7 +47,11 @@ import {
   SUPABASE_SQL_INIT_SCRIPT,
   SupabaseUsuarioRow
 } from '../services/supabaseService';
-import { INITIAL_SUPABASE_USERS, INITIAL_CLIENTS, INITIAL_PROJECTS } from '../data/initialData';
+import {
+  INITIAL_SUPABASE_USERS,
+  INITIAL_CLIENTS,
+  INITIAL_PROJECTS
+} from '../data/initialData';
 import { ContainersConfigSection, DEFAULT_CONTAINER_SETTINGS } from './ContainersConfigSection';
 import { ClientsConfigSection } from './ClientsConfigSection';
 import { UsersConfigSection } from './UsersConfigSection';
@@ -68,6 +85,11 @@ interface ConfigurationViewProps {
   onUpdateContainerLayout: (layout: ContainerLayoutConfig[]) => void;
   monthlyHistory: MonthlyKpiSnapshot[];
   onUpdateMonthlyHistory: (history: MonthlyKpiSnapshot[]) => void;
+  projetosSemAtualizacao?: ProjetoSemAtualizacao[];
+  catalogoPortfolio?: CatalogoPortfolio;
+  onUpdateCatalogoPortfolio?: (catalogo: CatalogoPortfolio) => void;
+  /** Instruções gravadas no servidor; têm prioridade sobre a cópia do navegador. */
+  instrucoesServidor?: string;
 }
 
 export const DEFAULT_APP_INSTRUCOES = `FONTE DOS DADOS
@@ -131,7 +153,11 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
   onUpdatePageLayout,
   onUpdateContainerLayout,
   monthlyHistory,
-  onUpdateMonthlyHistory
+  onUpdateMonthlyHistory,
+  projetosSemAtualizacao = [] as ProjetoSemAtualizacao[],
+  catalogoPortfolio = DEFAULT_CATALOGO_PORTFOLIO,
+  onUpdateCatalogoPortfolio = (_catalogo: CatalogoPortfolio) => {},
+  instrucoesServidor = ''
 }) => {
   const [activeSection, setActiveSection] = useState<
     'containers' | 'clients' | 'sharepoint' | 'upload' | 'projects' | 'period' | 'migration' | 'demonstrativo' | 'usuarios' | 'layout' | 'historico'
@@ -219,6 +245,62 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
     } catch {}
     syncVmoServerState({ instrucoesPreenchimento });
     showNotification('Instruções para preenchimento salvas com sucesso!');
+  };
+
+  // A versão do servidor prevalece: antes, uma cópia antiga guardada no
+  // navegador podia sobrescrever o manual atualizado ao clicar em Salvar.
+  useEffect(() => {
+    if (instrucoesServidor && instrucoesServidor.trim()) {
+      setInstrucoesPreenchimento(instrucoesServidor);
+      try {
+        localStorage.setItem('vmo_instrucoes_preenchimento', instrucoesServidor);
+      } catch {}
+    }
+  }, [instrucoesServidor]);
+
+  // Frentes × soluções: nomes, responsáveis e soluções de cada frente.
+  // Quantidades fixas (6 soluções, 5 frentes) para os filtros continuarem valendo.
+  const rot = useCatalogo();
+  const [catalogoEditavel, setCatalogoEditavel] = useState<CatalogoPortfolio>(catalogoPortfolio);
+  const [responsaveisTexto, setResponsaveisTexto] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setCatalogoEditavel(catalogoPortfolio);
+    setResponsaveisTexto(
+      Object.fromEntries(catalogoPortfolio.frentes.map(f => [f.key, f.responsaveis.join(', ')]))
+    );
+  }, [catalogoPortfolio]);
+
+  const renomearSolucao = (key: SolutionType, label: string) => {
+    setCatalogoEditavel({
+      ...catalogoEditavel,
+      solucoes: catalogoEditavel.solucoes.map(sol => (sol.key === key ? { ...sol, label } : sol))
+    });
+  };
+
+  const atualizarFrente = (key: FrontType, parcial: Partial<FrenteConfig>) => {
+    setCatalogoEditavel({
+      ...catalogoEditavel,
+      frentes: catalogoEditavel.frentes.map(f => (f.key === key ? { ...f, ...parcial } : f))
+    });
+  };
+
+  const handleSaveCatalogo = () => {
+    const comResponsaveis: CatalogoPortfolio = {
+      ...catalogoEditavel,
+      frentes: catalogoEditavel.frentes.map(f => ({
+        ...f,
+        responsaveis: (responsaveisTexto[f.key] ?? f.responsaveis.join(', '))
+          .split(/[,;]/)
+          .map(nome => nome.trim())
+          .filter(Boolean)
+      }))
+    };
+    onUpdateCatalogoPortfolio(normalizarCatalogo(comResponsaveis));
+    showNotification('Frentes e soluções salvas. Filtros e próximas migrações já usam esta configuração.');
+  };
+
+  const alterarProjeto = (id: string, parcial: Partial<SapProjectFinancial>) => {
+    onUpdateProjects(projects.map(proj => (proj.id === id ? { ...proj, ...parcial } : proj)));
   };
 
   // Configuração e Estado da API Corporativa para o Claude
@@ -354,7 +436,7 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
     } catch {}
     onUpdateProjects([]);
     onUpdateClients([]);
-    syncVmoServerState({ projects: [], clients: [] }).then(res => {
+    syncVmoServerState({ projects: [], clients: [], confirmarLimpeza: true }).then(res => {
       if (res.success) {
         showNotification('Todos os dados atuais do webapp foram zerados com sucesso (0 projetos, 0 clientes).');
       } else {
@@ -537,6 +619,10 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
             client: newProject.client!,
             clientLogo: projectLogo,
             solution: (newProject.solution as SolutionType) || p.solution,
+            front:
+              newProject.front ||
+              definirFrente(catalogoPortfolio, newProject.portfolioManager ?? p.portfolioManager, newProject.solution || p.solution).frente ||
+              undefined,
             projectManager: newProject.projectManager || p.projectManager,
             status: projectStatus,
             closureDate: projectStatus === 'ENCERRADO' ? (newProject.closureDate || '') : undefined,
@@ -581,7 +667,14 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
         client: newProject.client!,
         clientLogo: projectLogo,
         solution: (newProject.solution as SolutionType) || 'RISE',
-        projectManager: newProject.projectManager || 'Ricardo Silva',
+        front:
+          newProject.front ||
+          definirFrente(catalogoPortfolio, newProject.portfolioManager, newProject.solution || 'RISE').frente ||
+          undefined,
+        projectManager: newProject.projectManager || '',
+        projectIdS4: newProject.projectIdS4 || undefined,
+        projectIdMissing: newProject.projectIdS4 ? false : newProject.projectIdMissing,
+        portfolioManager: newProject.portfolioManager || undefined,
         status: projectStatus,
         closureDate: projectStatus === 'ENCERRADO' ? (newProject.closureDate || '') : undefined,
         budgetPlanned: planned,
@@ -1191,6 +1284,10 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
             />
           </div>
 
+          <p className="text-[11px] text-slate-600">
+            Frentes, soluções e responsáveis ficam em Gestão de projetos SAP. O Claude usa essa configuração para classificar cada projeto na migração.
+          </p>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Upload Area */}
             <div className="border-2 border-dashed border-slate-300 p-6 text-center bg-slate-50 space-y-3 flex flex-col justify-center items-center">
@@ -1263,6 +1360,117 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
             )}
           </div>
 
+          {/* Frentes × soluções: catálogo editável pelo PMO (quantidades fixas) */}
+          <div className="border border-slate-300 bg-slate-50 p-3 space-y-3" id="catalogo-frentes-solucoes">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-bold text-slate-900">Frentes e soluções</h4>
+                <p className="text-[11px] text-slate-600 max-w-3xl">
+                  A solução vem do campo Project Portfolio da RSE. A frente é a do gerente de portfólio responsável e pode reunir mais de uma solução. São sempre 6 soluções e 5 frentes: renomeie e redistribua à vontade, e os filtros acompanham.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveCatalogo}
+                className="px-3 py-1.5 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs transition-colors"
+              >
+                Salvar frentes e soluções
+              </button>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-bold text-slate-700 mb-1">Soluções</div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                {catalogoEditavel.solucoes.map(sol => (
+                  <label key={sol.key} className="block">
+                    <span className="block text-[10px] font-mono text-slate-500 mb-0.5">{sol.key}</span>
+                    <input
+                      type="text"
+                      value={sol.label}
+                      onChange={e => renomearSolucao(sol.key, e.target.value)}
+                      aria-label={`Nome da solução ${sol.key}`}
+                      className="w-full p-1 border border-slate-300 text-xs bg-white text-slate-900"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[11px] font-bold text-slate-700 mb-1">Frentes</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs border-collapse bg-white">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700">
+                      <th className="p-1.5 border border-slate-200 text-left">Frente</th>
+                      <th className="p-1.5 border border-slate-200 text-left">Responsável (gerente de portfólio)</th>
+                      <th className="p-1.5 border border-slate-200 text-left">Soluções da frente</th>
+                      <th className="p-1.5 border border-slate-200 text-right">Projetos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catalogoEditavel.frentes.map(f => (
+                      <tr key={f.key}>
+                        <td className="p-1.5 border border-slate-200 align-top">
+                          <input
+                            type="text"
+                            value={f.label}
+                            onChange={e => atualizarFrente(f.key, { label: e.target.value })}
+                            aria-label={`Nome da frente ${f.key}`}
+                            className="w-full min-w-[110px] p-1 border border-slate-300 text-xs bg-white text-slate-900"
+                          />
+                        </td>
+                        <td className="p-1.5 border border-slate-200 align-top">
+                          <input
+                            type="text"
+                            value={responsaveisTexto[f.key] ?? f.responsaveis.join(', ')}
+                            onChange={e => setResponsaveisTexto({ ...responsaveisTexto, [f.key]: e.target.value })}
+                            placeholder="Nome como aparece na RSE"
+                            aria-label={`Responsáveis pela frente ${f.label}`}
+                            className="w-full min-w-[180px] p-1 border border-slate-300 text-xs bg-white text-slate-900"
+                          />
+                          <span className="block text-[10px] text-slate-500 mt-0.5">Separe mais de um nome por vírgula.</span>
+                        </td>
+                        <td className="p-1.5 border border-slate-200 align-top">
+                          <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            {catalogoEditavel.solucoes.map(sol => (
+                              <label key={sol.key} className="inline-flex items-center gap-1 text-slate-800">
+                                <input
+                                  type="checkbox"
+                                  checked={f.solucoes.includes(sol.key)}
+                                  onChange={e =>
+                                    atualizarFrente(f.key, {
+                                      solucoes: e.target.checked
+                                        ? [...f.solucoes, sol.key]
+                                        : f.solucoes.filter(x => x !== sol.key)
+                                    })
+                                  }
+                                />
+                                {sol.label || sol.key}
+                              </label>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="p-1.5 border border-slate-200 text-right align-top font-mono">
+                          {projects.filter(proj => frenteEfetiva(proj, catalogoPortfolio) === f.key).length}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {projetosSemAtualizacao.length > 0 && (
+              <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 p-2">
+                {projetosSemAtualizacao.length === 1
+                  ? '1 projeto aguarda a atualização da RSE pelo GP.'
+                  : `${projetosSemAtualizacao.length} projetos aguardam a atualização da RSE pelo GP.`}{' '}
+                A lista está em Pontos de Atenção.
+              </p>
+            )}
+          </div>
+
           <form onSubmit={handleAddOrUpdateProject} className="p-3 bg-slate-50 border border-slate-300 space-y-3">
             {/* Bloco 1: Identificação */}
             <div className="grid grid-cols-1 sm:grid-cols-6 gap-2">
@@ -1310,7 +1518,7 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                 />
                 <datalist id="client-suggestions">
                   {clients.map(c => (
-                    <option key={c.id} value={c.name}>{c.shortName} ({c.defaultSolution})</option>
+                    <option key={c.id} value={c.name}>{c.shortName} ({rot.solucao(c.defaultSolution)})</option>
                   ))}
                 </datalist>
               </div>
@@ -1340,27 +1548,73 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
               </div>
             </div>
 
+            {/* Bloco 1b: Identificação oficial (preenchida pelo Claude a partir da RSE) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Project ID (S4 Public Exed):</label>
+                <input
+                  type="text"
+                  value={newProject.projectIdS4 || ''}
+                  onChange={e => {
+                    const valor = e.target.value.trim();
+                    setNewProject({ ...newProject, projectIdS4: valor, projectIdMissing: valor ? false : newProject.projectIdMissing });
+                  }}
+                  placeholder="Ex.: BRLTKIPIP250304"
+                  className="w-full p-1.5 border border-slate-300 text-xs bg-white text-slate-900 font-mono"
+                />
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  Vem da aba PROJECT DATA da RSE. É por ele que o Claude encontra o projeto nas próximas migrações.
+                </p>
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Gerente de portfólio:</label>
+                <input
+                  type="text"
+                  value={newProject.portfolioManager || ''}
+                  onChange={e => setNewProject({ ...newProject, portfolioManager: e.target.value })}
+                  className="w-full p-1.5 border border-slate-300 text-xs bg-white text-slate-900"
+                />
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  Responsável pela frente, conforme Frentes e soluções.
+                </p>
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Frente:</label>
+                <select
+                  value={newProject.front || ''}
+                  onChange={e => setNewProject({ ...newProject, front: (e.target.value || undefined) as FrontType | undefined })}
+                  className="w-full p-1.5 border border-slate-300 text-xs bg-white text-slate-900"
+                >
+                  <option value="">Pelo gerente de portfólio</option>
+                  {rot.catalogo.frentes.map(f => (
+                    <option key={f.key} value={f.key}>{f.label}</option>
+                  ))}
+                </select>
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  Em branco, a frente segue o responsável cadastrado.
+                </p>
+              </div>
+            </div>
+
             {/* Bloco 2: Gestão & Financeiro */}
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Solução SAP:</label>
+                <label className="block font-semibold text-slate-700 mb-1">Solução:</label>
                 <select
                   value={newProject.solution || 'RISE'}
                   onChange={e => setNewProject({ ...newProject, solution: e.target.value as SolutionType })}
                   className="w-full p-1.5 border border-slate-300 text-xs bg-white text-slate-900"
                 >
-                  <option value="RISE">RISE</option>
-                  <option value="GROW">GROW</option>
-                  <option value="Fábrica">Fábrica</option>
-                  <option value="SCP (IBP)">SCP (IBP)</option>
-                  <option value="SCE">SCE</option>
+                  {rot.catalogo.solucoes.map(s => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
                 </select>
               </div>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">GP Responsável:</label>
                 <input
                   type="text"
-                  value={newProject.projectManager || 'Ricardo Silva'}
+                  value={newProject.projectManager || ''}
                   onChange={e => setNewProject({ ...newProject, projectManager: e.target.value })}
                   className="w-full p-1.5 border border-slate-300 text-xs bg-white text-slate-900"
                   required
@@ -1628,6 +1882,7 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                 <tr className="bg-slate-100 text-slate-700 uppercase text-[10px]">
                   <th className="p-2 border border-slate-300">Código</th>
                   <th className="p-2 border border-slate-300">Logo + Cliente / Projeto</th>
+                  <th className="p-2 border border-slate-300">Frente</th>
                   <th className="p-2 border border-slate-300">Solução</th>
                   <th className="p-2 border border-slate-300">GP</th>
                   <th className="p-2 border border-slate-300 text-right">Orçado</th>
@@ -1656,6 +1911,15 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                     >
                       <td className="p-2 border border-slate-200 font-mono font-bold text-slate-900">
                         {p.code}
+                        {p.projectIdS4 ? (
+                          p.projectIdS4 !== p.code && (
+                            <div className="text-[10px] font-normal text-slate-500">S4: {p.projectIdS4}</div>
+                          )
+                        ) : (
+                          <div className="mt-0.5 inline-block px-1 py-0.5 text-[9px] font-sans font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                            Sem Project ID S4
+                          </div>
+                        )}
                       </td>
                       <td className="p-2 border border-slate-200">
                         <div className="flex items-center gap-2">
@@ -1671,19 +1935,50 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                           </div>
                         </div>
                       </td>
-                      <td className="p-2 border border-slate-200 font-semibold">{p.solution}</td>
+                      <td className="p-2 border border-slate-200">
+                        <select
+                          value={frenteEfetiva(p, catalogoPortfolio) || ''}
+                          onChange={e => alterarProjeto(p.id, { front: (e.target.value || undefined) as FrontType | undefined })}
+                          aria-label={`Frente de ${p.name}`}
+                          className="w-full min-w-[110px] p-1 border border-slate-300 text-[11px] bg-white text-slate-900"
+                        >
+                          <option value="">—</option>
+                          {rot.catalogo.frentes.map(f => (
+                            <option key={f.key} value={f.key}>{f.label}</option>
+                          ))}
+                        </select>
+                        {!normalizarFrente(p.front, catalogoPortfolio) && frenteEfetiva(p, catalogoPortfolio) && (
+                          <span className="block text-[10px] text-slate-500 mt-0.5">Pelo responsável</span>
+                        )}
+                      </td>
+                      <td className="p-2 border border-slate-200">
+                        <select
+                          value={normalizarSolucao(p.solution, catalogoPortfolio) || ''}
+                          onChange={e => alterarProjeto(p.id, { solution: e.target.value as SolutionType })}
+                          aria-label={`Solução de ${p.name}`}
+                          className="w-full min-w-[90px] p-1 border border-slate-300 text-[11px] bg-white text-slate-900 font-semibold"
+                        >
+                          {!normalizarSolucao(p.solution, catalogoPortfolio) && <option value="">—</option>}
+                          {rot.catalogo.solucoes.map(sol => (
+                            <option key={sol.key} value={sol.key}>{sol.label}</option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="p-2 border border-slate-200 text-slate-600 text-[11px]">
-                        {p.projectManager || 'Ricardo Silva'}
+                        {p.projectManager || '—'}
+                        {p.portfolioManager && (
+                          <div className="text-[10px] text-slate-400">Portfólio: {p.portfolioManager}</div>
+                        )}
                       </td>
                       <td className="p-2 border border-slate-200 text-right font-mono">
-                        R$ {p.budgetPlanned.toLocaleString('pt-BR')}
+                        {typeof p.budgetPlanned === 'number' ? `R$ ${p.budgetPlanned.toLocaleString('pt-BR')}` : '—'}
                       </td>
                       <td className="p-2 border border-slate-200 text-right font-mono font-bold">
-                        R$ {p.budgetRealized.toLocaleString('pt-BR')}
+                        {typeof p.budgetRealized === 'number' ? `R$ ${p.budgetRealized.toLocaleString('pt-BR')}` : '—'}
                       </td>
                       <td className="p-2 border border-slate-200 text-center font-mono font-semibold">
                         <span className={p.marginPercent < 20 ? 'text-rose-600' : 'text-emerald-700'}>
-                          {p.marginPercent.toFixed(1)}%
+                          {typeof p.marginPercent === 'number' ? `${p.marginPercent.toFixed(1)}%` : '—'}
                         </span>
                       </td>
                       <td className="p-2 border border-slate-200 text-center">

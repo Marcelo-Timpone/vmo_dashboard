@@ -30,6 +30,7 @@ export default async function handler(req: any, res: any) {
       nome: p.name,
       cliente: p.client,
       solucao: p.solution,
+      frente: p.front ?? null,
       orcado: p.budgetPlanned,
       realizado: p.budgetRealized,
       faturado: p.billed,

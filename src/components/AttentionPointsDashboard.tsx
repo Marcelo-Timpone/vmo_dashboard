@@ -1,7 +1,9 @@
 import React, { useMemo } from 'react';
-import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
+import { SapProjectFinancial, AppTheme, ContainerParamSettings, ContainerLayoutConfig, MonthlyKpiSnapshot, ProjetoSemAtualizacao } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
+import { useCatalogo } from '../context/CatalogoContext';
+import { filtrarProjetosPorPortfolio } from '../utils/portfolio';
 import { ClientLogo } from './ClientLogo';
 import { ContainerSlot } from './ContainerSlot';
 import { MoMBadge, MoMEmpty } from './MoMBadge';
@@ -12,6 +14,19 @@ import {
   latestHistoryMonth
 } from '../utils/monthlyComparison';
 
+const MESES_CURTOS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+function rotuloMes(monthKey: string): string {
+  const [ano, mes] = monthKey.split('-').map(Number);
+  return mes >= 1 && mes <= 12 ? `${MESES_CURTOS[mes - 1]}/${ano}` : monthKey;
+}
+
+function formatarDataCurta(iso?: string): string {
+  if (!iso) return '—';
+  const [a, m, d] = iso.slice(0, 10).split('-');
+  return a && m && d ? `${d}/${m}/${a}` : iso;
+}
+
 interface AttentionPointsDashboardProps {
   projects: SapProjectFinancial[];
   selectedFilters: FilterSolutionType[];
@@ -20,6 +35,7 @@ interface AttentionPointsDashboardProps {
   containerLayout?: ContainerLayoutConfig[];
   isPmo?: boolean;
   monthlyHistory?: MonthlyKpiSnapshot[];
+  projetosSemAtualizacao?: ProjetoSemAtualizacao[];
 }
 
 export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> = ({
@@ -29,10 +45,22 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
   containerSettings,
   containerLayout,
   isPmo = false,
-  monthlyHistory = []
+  monthlyHistory = [],
+  projetosSemAtualizacao = [] as ProjetoSemAtualizacao[]
 }) => {
+  const rot = useCatalogo();
   // CÓDIGO MORTO (T9): o app é fixo em tema Neon, então isLight é sempre false.
   const isLight = theme === 'light';
+
+  // Projetos cujo GP não atualizou a RSE: mostra o mês mais recente registrado.
+  const mesSemAtualizacao = useMemo(() => {
+    const meses = projetosSemAtualizacao.map(p => p.monthKey).filter(Boolean).sort();
+    return meses.length ? meses[meses.length - 1] : null;
+  }, [projetosSemAtualizacao]);
+  const semAtualizacaoDoMes = useMemo(
+    () => (mesSemAtualizacao ? projetosSemAtualizacao.filter(p => p.monthKey === mesSemAtualizacao) : []),
+    [projetosSemAtualizacao, mesSemAtualizacao]
+  );
   // T7 — metas opcionais. Sem meta configurada, não há "abaixo da meta":
   // a detração de margem passa a ser medida contra a média do próprio portfólio.
   const rawMarginTarget = containerSettings?.contractMarginTarget;
@@ -40,18 +68,11 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
     typeof rawMarginTarget === 'number' && Number.isFinite(rawMarginTarget) && rawMarginTarget > 0;
   const governanceThreshold = containerSettings?.governanceComplianceThreshold ?? 80.0;
 
-  // Filter projects by selected SAP solutions
-  const filteredProjects = useMemo(() => {
-    if (selectedFilters.includes('TODOS') || selectedFilters.length === 0) {
-      return projects;
-    }
-    return projects.filter(p => {
-      return selectedFilters.some(filter => {
-        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
-        return p.solution === filter;
-      });
-    });
-  }, [projects, selectedFilters]);
+  // Filtra por frente e solução (itens do mesmo grupo somam; grupos se cruzam)
+  const filteredProjects = useMemo(
+    () => filtrarProjetosPorPortfolio(projects, selectedFilters, rot.catalogo),
+    [projects, selectedFilters, rot.catalogo]
+  );
 
   // Client monogram helper
   const getClientInitials = (name: string) => {
@@ -77,7 +98,9 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
 
   const portfolioAvgMargin = useMemo(() => {
     if (filteredProjects.length === 0) return null;
-    return filteredProjects.reduce((acc, p) => acc + p.marginPercent, 0) / filteredProjects.length;
+    const comMargem = filteredProjects.filter(p => typeof p.marginPercent === 'number' && Number.isFinite(p.marginPercent));
+    if (comMargem.length === 0) return null;
+    return comMargem.reduce((acc, p) => acc + p.marginPercent, 0) / comMargem.length;
   }, [filteredProjects]);
 
   // Referência de detração: a meta quando existe, senão a média do portfólio.
@@ -234,7 +257,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                               ? 'bg-slate-100 text-slate-700 border-slate-200'
                               : 'bg-[#071626] text-slate-300 border-slate-700'
                           }`}>
-                            {p.solution}
+                            {rot.solucao(p.solution)}
                           </span>
                         </td>
                         <td className={`py-1 px-2 text-right font-mono font-bold text-[11px] ${
@@ -296,13 +319,13 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                               ? 'bg-slate-100 text-slate-700 border-slate-200'
                               : 'bg-[#071626] text-slate-300 border-slate-700'
                           }`}>
-                            {p.solution}
+                            {rot.solucao(p.solution)}
                           </span>
                         </td>
                         <td className={`py-1 px-2 text-right font-mono font-bold text-[11px] ${
                           isLight ? 'text-red-600' : 'text-[#FF3366]'
                         }`}>
-                          {p.marginPercent.toFixed(1)}%
+                          {typeof p.marginPercent === 'number' ? `${p.marginPercent.toFixed(1)}%` : '—'}
                         </td>
                       </tr>
                     ))}
@@ -490,7 +513,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                                 ? 'bg-white text-slate-700 border-slate-200'
                                 : 'bg-[#0A1C30] text-slate-300 border-slate-700'
                             }`}>
-                              {p.solution}
+                              {rot.solucao(p.solution)}
                             </span>
                           </td>
                           <td
@@ -574,7 +597,7 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
                       ? 'bg-slate-100 text-slate-600 border-slate-200'
                       : 'bg-[#071626] text-slate-400 border-slate-700'
                   }`}>
-                    {item.solution}
+                    {rot.solucao(item.solution)}
                   </span>
                 </div>
 
@@ -616,6 +639,73 @@ export const AttentionPointsDashboard: React.FC<AttentionPointsDashboardProps> =
             );
           })}
         </div>
+      </div>
+      </ContainerSlot>
+
+      {/* ========================================================================= */}
+      {/* 4. PROJETOS SEM ATUALIZAÇÃO DO GP                                         */}
+      {/* ========================================================================= */}
+      <ContainerSlot id="pontos_atencao__sem_atualizacao" layout={containerLayout} isPmo={isPmo}>
+      <div className={`p-2.5 border ${
+        isLight
+          ? 'bg-white border-slate-200 shadow-sm'
+          : 'bg-[#0A1C30] border-[#16385C] shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
+      }`}>
+        <div className={`flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
+          isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
+        }`}>
+          <span>Projetos sem atualização do GP</span>
+          {mesSemAtualizacao && (
+            <span className={`text-[10px] font-semibold normal-case tracking-normal ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+              {semAtualizacaoDoMes.length} {semAtualizacaoDoMes.length === 1 ? 'projeto' : 'projetos'} em {rotuloMes(mesSemAtualizacao)}
+            </span>
+          )}
+        </div>
+
+        {semAtualizacaoDoMes.length === 0 ? (
+          <div className={`text-xs py-3 text-center italic border ${
+            isLight ? 'text-slate-500 border-slate-200' : 'text-slate-400 border-slate-800'
+          }`}>
+            Nenhum projeto aguardando atualização da RSE neste mês.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[11px]">
+              <thead>
+                <tr className={isLight ? 'text-slate-500' : 'text-slate-400'}>
+                  <th className="py-1 px-2 font-semibold">Projeto</th>
+                  <th className="py-1 px-2 font-semibold">Cliente</th>
+                  <th className="py-1 px-2 font-semibold">GP</th>
+                  <th className="py-1 px-2 font-semibold">Frente</th>
+                  <th className="py-1 px-2 font-semibold">Solução</th>
+                  <th className="py-1 px-2 font-semibold text-right">Última RSE</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${isLight ? 'divide-slate-200' : 'divide-slate-800'}`}>
+                {semAtualizacaoDoMes.map(p => (
+                  <tr key={`${p.projectId}-${p.monthKey}`} title={p.notes || undefined}>
+                    <td className="py-1 px-2">
+                      <div className="font-semibold">{p.name}</div>
+                      <div className={`font-mono text-[10px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {p.projectIdS4 || p.projectId}
+                      </div>
+                    </td>
+                    <td className="py-1 px-2">{p.client || '—'}</td>
+                    <td className="py-1 px-2">{p.projectManager || '—'}</td>
+                    <td className="py-1 px-2">{p.front ? rot.frente(p.front) : '—'}</td>
+                    <td className="py-1 px-2">{p.solution ? rot.solucao(p.solution) : '—'}</td>
+                    <td className={`py-1 px-2 text-right font-mono font-bold ${isLight ? 'text-amber-700' : 'text-amber-400'}`}>
+                      {formatarDataCurta(p.lastStatusDate)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className={`mt-2 text-[10px] ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>
+          Estes projetos ficam fora dos indicadores do mês até o GP atualizar a RSE.
+        </p>
       </div>
       </ContainerSlot>
     </div>

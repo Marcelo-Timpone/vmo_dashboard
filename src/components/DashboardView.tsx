@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { SapProjectFinancial, VmoReferencePeriod, AppTheme, ContainerParamSettings, PageLayoutConfig, ContainerLayoutConfig, MonthlyKpiSnapshot } from '../types';
+import { SapProjectFinancial, VmoReferencePeriod, AppTheme, ContainerParamSettings, PageLayoutConfig, ContainerLayoutConfig, MonthlyKpiSnapshot, ProjetoSemAtualizacao } from '../types';
 import { exportToPdf, exportToPpt } from '../utils/exportUtils';
 import { isProjectActiveForReferencePeriod } from '../utils/dateUtils';
 import {
@@ -24,6 +24,7 @@ interface DashboardViewProps {
   pageLayout?: PageLayoutConfig[];
   containerLayout?: ContainerLayoutConfig[];
   monthlyHistory?: MonthlyKpiSnapshot[];
+  projetosSemAtualizacao?: ProjetoSemAtualizacao[];
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -34,7 +35,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   containerSettings,
   pageLayout,
   containerLayout,
-  monthlyHistory
+  monthlyHistory,
+  projetosSemAtualizacao = [] as ProjetoSemAtualizacao[]
 }) => {
   // Páginas visíveis para o usuário atual, já ordenadas conforme configurado
   // em Configurações > Layout do Dashboard. Páginas ocultas só aparecem para PMO.
@@ -309,6 +311,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span className="text-white font-extrabold text-sm tracking-wide">PONTOS DE ATENÇÃO</span>
             </div>
             <AttentionPointsDashboard
+              projetosSemAtualizacao={projetosSemAtualizacao}
               projects={dashboardProjects}
               selectedFilters={selectedFilters}
               theme={theme}

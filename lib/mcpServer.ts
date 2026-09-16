@@ -32,7 +32,7 @@ const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
 const SERVER_INFO = {
   name: 'vmo-exed',
   title: 'VMO Corporativo — Exed Consulting',
-  version: '1.0.0'
+  version: '1.1.0'
 };
 
 // ------------------------------------------------------------------ JSON-RPC
@@ -70,7 +70,7 @@ const TOOLS = [
       properties: {
         secao: {
           type: 'string',
-          enum: ['resumo', 'projetos', 'clientes', 'historico_mensal', 'configuracao', 'tudo'],
+          enum: ['resumo', 'projetos', 'clientes', 'historico_mensal', 'projetos_sem_atualizacao', 'catalogo', 'instrucoes', 'configuracao', 'tudo'],
           description: 'Parte do estado a retornar. Padrão: "resumo".'
         }
       },
@@ -103,7 +103,13 @@ const TOOLS = [
       'completo, incluindo os projetos que já existiam e não mudaram — enviar só os alterados ' +
       'APAGA todos os outros. Rode listar_projetos antes para conferir. ' +
       'O campo "id" de cada projeto deve ser o "Project ID (S4 Public Exed)" de dentro da ' +
-      'planilha, nunca o nome do arquivo: é ele que amarra o projeto ao seu histórico.',
+      'planilha, nunca o nome do arquivo: é ele que amarra o projeto ao seu histórico. ' +
+      'Grave o mesmo valor em projectIdS4 (ou projectIdMissing: true quando a RSE não tiver o ID). ' +
+      'solution é a chave da solução (RISE, GROW, SCE, SCP, FSW ou DSC), vinda do Project Portfolio. ' +
+      'front é a chave da frente (RISE, GROW, IBP, SUPPLY_CHAIN ou FABRICA), definida pelo gerente de ' +
+      'portfólio responsável (ler_estado_vmo secao="catalogo"); sem front, o servidor calcula. ' +
+      'Clientes que não existirem são cadastrados ' +
+      'automaticamente. Lista vazia só apaga com confirmarLimpeza: true.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -111,6 +117,10 @@ const TOOLS = [
           type: 'array',
           description: 'Array completo de projetos no formato SapProjectFinancial.',
           items: { type: 'object' }
+        },
+        confirmarLimpeza: {
+          type: 'boolean',
+          description: 'Só com true uma lista vazia apaga os projetos existentes.'
         }
       },
       required: ['projetos'],
@@ -177,7 +187,8 @@ const TOOLS = [
                   properties: {
                     projectId: { type: 'string', description: 'Project ID (S4 Public Exed)' },
                     client: { type: 'string' },
-                    solution: { type: 'string' },
+                    solution: { type: 'string', description: 'Chave da solução' },
+                    front: { type: 'string', description: 'Chave da frente' },
                     budgetRealized: { type: 'number', description: 'Uso de orçamento real no mês (R$)' },
                     billed: { type: 'number', description: 'Faturado acumulado do projeto até o fechamento do mês (R$)' },
                     marginPercent: { type: 'number', description: 'Margem do projeto no mês (%)' },
@@ -212,6 +223,43 @@ const TOOLS = [
       required: ['payload'],
       additionalProperties: false
     }
+  },
+  {
+    name: 'registrar_projetos_sem_atualizacao',
+    title: 'Registrar projetos sem atualização do GP',
+    description:
+      'Registra os projetos cuja RSE mais recente tem Status Date fora do mês migrado (o GP não ' +
+      'atualizou). Esses projetos NÃO entram no histórico nem na lista de projetos do mês e ' +
+      'aparecem em Pontos de Atenção. Substitui os registros do mesmo mesReferencia e mantém os ' +
+      'dos outros meses. Envie projetos: [] para limpar o mês. Os clientes citados são cadastrados.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mesReferencia: { type: 'string', description: 'AAAA-MM do mês em que a atualização faltou' },
+        projetos: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              projectId: { type: 'string', description: 'Project ID (S4) ou chave provisória' },
+              projectIdS4: { type: 'string' },
+              name: { type: 'string' },
+              client: { type: 'string' },
+              solution: { type: 'string', description: 'Chave da solução' },
+              front: { type: 'string', description: 'Chave da frente' },
+              projectManager: { type: 'string' },
+              portfolioManager: { type: 'string' },
+              lastStatusDate: { type: 'string', description: 'Último Status Date encontrado (AAAA-MM-DD)' },
+              sourceFile: { type: 'string', description: 'Arquivo onde a atualização era esperada' },
+              notes: { type: 'string' }
+            },
+            required: ['projectId', 'name']
+          }
+        }
+      },
+      required: ['mesReferencia', 'projetos'],
+      additionalProperties: false
+    }
   }
 ];
 
@@ -228,8 +276,12 @@ function resumoDe(state: any) {
     total_faturado_brl: totalFaturado,
     desvio_custo_consolidado_percentual:
       totalOrcado > 0 ? Number((((totalRealizado - totalOrcado) / totalOrcado) * 100).toFixed(2)) : 0,
+    projetos_sem_project_id_s4: state.projects.filter((p: any) => !p.projectIdS4).map((p: any) => p.id),
+    projetos_sem_atualizacao: (state.projetosSemAtualizacao || []).length,
+    versao_instrucoes: state.instrucoesVersao ?? null,
     periodo_referencia: state.referencePeriod,
-    ultima_atualizacao: state.lastSaved
+    ultima_atualizacao: state.lastSaved,
+    atualizado_por: state.updatedBy || null
   };
 }
 
@@ -242,6 +294,16 @@ async function executarTool(name: string, args: any) {
       if (secao === 'projetos') return toolText(state.projects);
       if (secao === 'clientes') return toolText(state.clients || []);
       if (secao === 'historico_mensal') return toolText(state.monthlyHistory || []);
+      if (secao === 'projetos_sem_atualizacao') return toolText(state.projetosSemAtualizacao || []);
+      if (secao === 'catalogo') return toolText(state.catalogoPortfolio);
+      if (secao === 'instrucoes') {
+        return toolText({
+          versao: state.instrucoesVersao ?? null,
+          instrucoesPreenchimento: state.instrucoesPreenchimento,
+          localDosDados: state.localDosDados,
+          catalogoPortfolio: state.catalogoPortfolio
+        });
+      }
       if (secao === 'configuracao') {
         return toolText({
           containerSettings: state.containerSettings,
@@ -251,7 +313,8 @@ async function executarTool(name: string, args: any) {
           theme: state.theme,
           sharePointLinks: state.sharePointLinks,
           instrucoesPreenchimento: state.instrucoesPreenchimento,
-          localDosDados: state.localDosDados
+          localDosDados: state.localDosDados,
+          catalogoPortfolio: state.catalogoPortfolio
         });
       }
       return toolText(state);
@@ -268,6 +331,7 @@ async function executarTool(name: string, args: any) {
           name: p.name,
           client: p.client,
           solution: p.solution,
+          front: p.front ?? null,
           status: p.status ?? null,
           marginPercent: p.marginPercent,
           billed: p.billed,
@@ -282,14 +346,22 @@ async function executarTool(name: string, args: any) {
       }
       const state = await loadState();
       const antes = state.projects.length;
-      applyIncomingUpdates(state, { projects: args.projetos });
+      const resultado = applyIncomingUpdates(state, {
+        projects: args.projetos,
+        confirmarLimpeza: args.confirmarLimpeza === true
+      });
       state.updatedBy = 'claude-mcp';
-      await saveState(state);
+      const gravacao = await saveState(state);
       return toolText({
-        sucesso: true,
+        sucesso: gravacao.bloqueios.length === 0 && resultado.ignorados.length === 0,
         projetos_antes: antes,
         projetos_depois: state.projects.length,
-        ultima_atualizacao: state.lastSaved
+        clientes_cadastrados: resultado.clientesCadastrados,
+        avisos: resultado.avisos,
+        ignorados: resultado.ignorados,
+        bloqueados_pelo_banco: gravacao.bloqueios,
+        ultima_atualizacao: state.lastSaved,
+        lembrete: 'Confira em vmo_app_state antes de reportar ao usuário.'
       });
     }
 
@@ -300,11 +372,39 @@ async function executarTool(name: string, args: any) {
       const state = await loadState();
       applyIncomingUpdates(state, { monthlyHistory: args.meses });
       state.updatedBy = 'claude-mcp';
-      await saveState(state);
+      const gravacao = await saveState(state);
       return toolText({
-        sucesso: true,
+        sucesso: gravacao.bloqueios.length === 0,
         meses_no_historico: (state.monthlyHistory || []).length,
         chaves: (state.monthlyHistory || []).map((m: any) => m.monthKey),
+        bloqueados_pelo_banco: gravacao.bloqueios,
+        ultima_atualizacao: state.lastSaved
+      });
+    }
+
+    case 'registrar_projetos_sem_atualizacao': {
+      const mes = String(args?.mesReferencia || '');
+      if (!/^\d{4}-\d{2}$/.test(mes) || !Array.isArray(args?.projetos)) {
+        return toolText('Erro: informe mesReferencia (AAAA-MM) e projetos (array).', true);
+      }
+      const state = await loadState();
+      const agora = new Date().toISOString();
+      const doMes = args.projetos.map((p: any) => ({ ...p, monthKey: mes, detectedAt: p?.detectedAt || agora }));
+      const outrosMeses = (state.projetosSemAtualizacao || []).filter((p: any) => p.monthKey !== mes);
+      const lista = [...outrosMeses, ...doMes];
+      const resultado = applyIncomingUpdates(state, {
+        projetosSemAtualizacao: lista,
+        confirmarLimpeza: lista.length === 0
+      });
+      state.updatedBy = 'claude-mcp';
+      const gravacao = await saveState(state);
+      return toolText({
+        sucesso: gravacao.bloqueios.length === 0,
+        mes,
+        projetos_no_mes: doMes.length,
+        total_registrado: (state.projetosSemAtualizacao || []).length,
+        clientes_cadastrados: resultado.clientesCadastrados,
+        bloqueados_pelo_banco: gravacao.bloqueios,
         ultima_atualizacao: state.lastSaved
       });
     }
@@ -314,13 +414,18 @@ async function executarTool(name: string, args: any) {
         return toolText('Erro: "payload" precisa ser um objeto.', true);
       }
       const state = await loadState();
-      applyIncomingUpdates(state, args.payload);
+      const resultado = applyIncomingUpdates(state, args.payload);
       state.updatedBy = 'claude-mcp';
-      await saveState(state);
+      const gravacao = await saveState(state);
       return toolText({
-        sucesso: true,
+        sucesso: gravacao.bloqueios.length === 0 && resultado.ignorados.length === 0,
         total_projetos: state.projects.length,
+        total_clientes: (state.clients || []).length,
         meses_no_historico: (state.monthlyHistory || []).length,
+        clientes_cadastrados: resultado.clientesCadastrados,
+        avisos: resultado.avisos,
+        ignorados: resultado.ignorados,
+        bloqueados_pelo_banco: gravacao.bloqueios,
         ultima_atualizacao: state.lastSaved
       });
     }
@@ -351,7 +456,8 @@ async function tratarMensagem(msg: any): Promise<any | null> {
           capabilities: { tools: { listChanged: false } },
           serverInfo: SERVER_INFO,
           instructions:
-            'Servidor do VMO Corporativo da Exed. Sempre chame ler_estado_vmo (secao="resumo") ou ' +
+            'Servidor do VMO Corporativo da Exed. Antes de migrar, leia o manual com ler_estado_vmo ' +
+            '(secao="instrucoes"). Sempre chame ler_estado_vmo (secao="resumo") ou ' +
             'listar_projetos antes de escrever. substituir_projetos troca o array inteiro — envie ' +
             'a lista completa. upsert_historico_mensal faz merge por monthKey e é seguro para ' +
             'atualizações incrementais.'

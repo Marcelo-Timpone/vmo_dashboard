@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   UserSession,
   SapProjectFinancial,
@@ -10,7 +10,10 @@ import {
   ContainerParamSettings,
   PageLayoutConfig,
   ContainerLayoutConfig,
-  MonthlyKpiSnapshot
+  MonthlyKpiSnapshot,
+  AppStateData,
+  ProjetoSemAtualizacao,
+  CatalogoPortfolio
 } from './types';
 import {
   INITIAL_PROJECTS,
@@ -24,6 +27,8 @@ import {
 import { DEFAULT_CONTAINER_SETTINGS } from './components/ContainersConfigSection';
 import { calculateVmoReferencePeriod } from './utils/dateUtils';
 import { fetchVmoServerState, syncVmoServerState } from './services/apiService';
+import { CatalogoProvider } from './context/CatalogoContext';
+import { DEFAULT_CATALOGO_PORTFOLIO, definirCatalogoAtual, normalizarCatalogo } from './utils/portfolio';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { LoginPage } from './components/LoginPage';
@@ -61,6 +66,19 @@ export default function App() {
     // INITIAL_CLIENTS só é usado pelo botão "restaurar demonstração".
     return [];
   });
+
+  // Mantidos pelo Claude na migração (somente leitura no webapp, exceto gestores).
+  const [projetosSemAtualizacao, setProjetosSemAtualizacao] = useState<ProjetoSemAtualizacao[]>([]);
+  // Frentes × soluções (nomes, responsáveis e soluções de cada frente)
+  const [catalogoPortfolio, setCatalogoPortfolio] = useState<CatalogoPortfolio>(DEFAULT_CATALOGO_PORTFOLIO);
+  definirCatalogoAtual(catalogoPortfolio);
+  const [instrucoesServidor, setInstrucoesServidor] = useState<string>('');
+
+  // Controle da sincronização com o servidor (ver comentário mais abaixo).
+  const [serverHydrated, setServerHydrated] = useState(false);
+  const serverLastSavedRef = useRef<string | null>(null);
+  const pularProximaSincronizacaoRef = useRef(false);
+  const ultimoPayloadRef = useRef('');
 
   const [projects, setProjects] = useState<SapProjectFinancial[]>(() => {
     try {
@@ -273,89 +291,146 @@ export default function App() {
     }
   }, [localDosDados]);
 
-  // Carregar dados atualizados do servidor (atualizações feitas pelo Claude) ao iniciar
-  useEffect(() => {
+  // ---------------------------------------------------------------------------
+  // SINCRONIZAÇÃO COM O SERVIDOR
+  // ---------------------------------------------------------------------------
+  // Incidente de 15/09/2026: a sincronização automática enviava a lista vazia
+  // guardada no navegador 800 ms depois de abrir a tela, antes de os dados do
+  // servidor chegarem, e apagava a migração feita pelo Claude.
+  // Agora: (1) nada é enviado antes de o servidor responder; (2) cada envio leva
+  // a data da versão carregada e o servidor recusa se ela estiver velha, e a
+  // tela recarrega; (3) o que acabou de chegar do servidor não é reenviado.
+  const aplicarEstadoDoServidor = (data: any) => {
+    const d = data?.dados || data || {};
+      const isCleared = localStorage.getItem('vmo_exed_projects_cleared');
+      if (Array.isArray(d.projetos || d.projects)) {
+        const serverProjects = d.projetos || d.projects;
+        if (
+          isCleared === 'true' &&
+          serverProjects.length > 0 &&
+          serverProjects.every((p: any) => p.status === 'DEMONSTRATIVO' || !p.status)
+        ) {
+          // Mantém zerado conforme escolha do usuário
+        } else {
+          setProjects(serverProjects);
+        }
+      }
+      if (Array.isArray(d.clientes || d.clients)) {
+        const serverClients = d.clientes || d.clients;
+        const isClientsCleared = localStorage.getItem('vmo_exed_clients_cleared');
+        if (
+          isClientsCleared === 'true' &&
+          serverClients.length > 0 &&
+          serverClients.every((c: any) => c.status === 'DEMONSTRATIVO' || !c.status)
+        ) {
+          // Mantém zerado conforme escolha do usuário
+        } else {
+          setClients(serverClients);
+        }
+      }
+      if (Array.isArray(d.links_sharepoint || d.sharePointLinks)) {
+        const sLinks = d.links_sharepoint || d.sharePointLinks;
+        if (sLinks.length === 3) {
+          setSharePointLinks(sLinks);
+        }
+      }
+      const link = d.local_dos_dados || d.LOCAL_DOS_DADOS || d.localDosDados;
+      if (link) {
+        setLocalDosDados(link);
+      }
+      const containers = d.configuracao_conteineres || d.containerSettings;
+      if (containers && typeof containers === 'object') {
+        setContainerSettings(containers);
+      }
+      if (Array.isArray(d.pageLayout) && d.pageLayout.length > 0) {
+        setPageLayout(d.pageLayout);
+      }
+      if (Array.isArray(d.containerLayout) && d.containerLayout.length > 0) {
+        // Acrescenta contêineres novos que o layout salvo ainda não conhece.
+        const idsSalvos = new Set(d.containerLayout.map((c: any) => c.id));
+        const novos = INITIAL_CONTAINER_LAYOUT.filter(c => !idsSalvos.has(c.id));
+        setContainerLayout([...d.containerLayout, ...novos]);
+      }
+      if (Array.isArray(d.monthlyHistory)) {
+        setMonthlyHistory(d.monthlyHistory);
+      }
+      const period = d.periodo_referencia || d.referencePeriod;
+      if (period && typeof period === 'object') {
+        setReferencePeriod(period);
+      }
+      const semAtualizacao = d.projetos_sem_atualizacao || d.projetosSemAtualizacao;
+      if (Array.isArray(semAtualizacao)) {
+        setProjetosSemAtualizacao(semAtualizacao);
+      }
+      const catalogo = d.catalogo_portfolio || d.catalogoPortfolio;
+      if (catalogo && typeof catalogo === 'object') {
+        setCatalogoPortfolio(normalizarCatalogo(catalogo));
+      }
+      const instrucoes = d.instrucoes_preenchimento || d.instrucoesPreenchimento;
+      if (typeof instrucoes === 'string' && instrucoes.trim()) {
+        setInstrucoesServidor(instrucoes);
+      }
+      serverLastSavedRef.current = d.ultima_atualizacao || data?.lastSaved || null;
+      pularProximaSincronizacaoRef.current = true;
+      setServerHydrated(true);
+  };
+
+  const carregarDoServidor = () => {
     fetchVmoServerState()
       .then(res => {
         if (res.success && res.data) {
-          const isCleared = localStorage.getItem('vmo_exed_projects_cleared');
-          const d = res.data.dados || res.data;
-          if (Array.isArray(d.projetos || d.projects)) {
-            const serverProjects = d.projetos || d.projects;
-            if (
-              isCleared === 'true' &&
-              serverProjects.length > 0 &&
-              serverProjects.every((p: any) => p.status === 'DEMONSTRATIVO' || !p.status)
-            ) {
-              // Mantém zerado conforme escolha do usuário
-            } else {
-              setProjects(serverProjects);
-            }
-          }
-          if (Array.isArray(d.clientes || d.clients)) {
-            const serverClients = d.clientes || d.clients;
-            const isClientsCleared = localStorage.getItem('vmo_exed_clients_cleared');
-            if (
-              isClientsCleared === 'true' &&
-              serverClients.length > 0 &&
-              serverClients.every((c: any) => c.status === 'DEMONSTRATIVO' || !c.status)
-            ) {
-              // Mantém zerado conforme escolha do usuário
-            } else {
-              setClients(serverClients);
-            }
-          }
-          if (Array.isArray(d.links_sharepoint || d.sharePointLinks)) {
-            const sLinks = d.links_sharepoint || d.sharePointLinks;
-            if (sLinks.length === 3) {
-              setSharePointLinks(sLinks);
-            }
-          }
-          const link = d.local_dos_dados || d.LOCAL_DOS_DADOS || d.localDosDados;
-          if (link) {
-            setLocalDosDados(link);
-          }
-          const containers = d.configuracao_conteineres || d.containerSettings;
-          if (containers && typeof containers === 'object') {
-            setContainerSettings(containers);
-          }
-          if (Array.isArray(d.pageLayout) && d.pageLayout.length > 0) {
-            setPageLayout(d.pageLayout);
-          }
-          if (Array.isArray(d.containerLayout) && d.containerLayout.length > 0) {
-            setContainerLayout(d.containerLayout);
-          }
-          if (Array.isArray(d.monthlyHistory)) {
-            setMonthlyHistory(d.monthlyHistory);
-          }
-          const period = d.periodo_referencia || d.referencePeriod;
-          if (period && typeof period === 'object') {
-            setReferencePeriod(period);
-          }
+          aplicarEstadoDoServidor(res.data);
+        } else {
+          console.warn('[VMO] Dados do servidor indisponíveis; sincronização desligada nesta sessão.', res.error);
         }
       })
       .catch(() => {});
+  };
+
+  // Carregar os dados do servidor (inclusive o que o Claude gravou) ao iniciar
+  useEffect(() => {
+    carregarDoServidor();
   }, []);
 
-  // Sincronização contínua do estado para o servidor para que o Claude veja em tempo real
+  // Sincronização contínua para o servidor, só depois do primeiro carregamento
   useEffect(() => {
+    if (!serverHydrated) return;
+    const payload: Partial<AppStateData> = {
+      projects,
+      clients,
+      widgets,
+      containerSettings,
+      sharePointLinks,
+      referencePeriod,
+      localDosDados,
+      theme,
+      pageLayout,
+      containerLayout,
+      monthlyHistory,
+      catalogoPortfolio
+    };
+    const payloadJson = JSON.stringify(payload);
+    if (pularProximaSincronizacaoRef.current) {
+      pularProximaSincronizacaoRef.current = false;
+      ultimoPayloadRef.current = payloadJson;
+      return;
+    }
+    if (payloadJson === ultimoPayloadRef.current) return;
     const timeout = setTimeout(() => {
-      syncVmoServerState({
-        projects,
-        clients,
-        widgets,
-        containerSettings,
-        sharePointLinks,
-        referencePeriod,
-        localDosDados,
-        theme,
-        pageLayout,
-        containerLayout,
-        monthlyHistory
-      }).catch(() => {});
+      syncVmoServerState(payload, { baseLastSaved: serverLastSavedRef.current })
+        .then(res => {
+          if (res.success) {
+            ultimoPayloadRef.current = payloadJson;
+            if (res.lastSaved) serverLastSavedRef.current = res.lastSaved;
+          } else if (res.conflict) {
+            console.warn('[VMO] Os dados mudaram no servidor; recarregando a versão atual.');
+            carregarDoServidor();
+          }
+        })
+        .catch(() => {});
     }, 800);
     return () => clearTimeout(timeout);
-  }, [projects, clients, widgets, containerSettings, sharePointLinks, referencePeriod, localDosDados, theme, pageLayout, containerLayout, monthlyHistory]);
+  }, [serverHydrated, projects, clients, widgets, containerSettings, sharePointLinks, referencePeriod, localDosDados, theme, pageLayout, containerLayout, monthlyHistory, catalogoPortfolio]);
 
   useEffect(() => {
     try {
@@ -406,6 +481,7 @@ export default function App() {
   const isDashboardTab = currentTab === 'dashboard';
 
   return (
+    <CatalogoProvider value={catalogoPortfolio}>
     <div
       className={`${
         isDashboardTab ? 'h-screen overflow-hidden' : 'min-h-screen'
@@ -440,6 +516,7 @@ export default function App() {
             pageLayout={pageLayout}
             containerLayout={containerLayout}
             monthlyHistory={monthlyHistory}
+            projetosSemAtualizacao={projetosSemAtualizacao}
           />
         )}
 
@@ -468,6 +545,10 @@ export default function App() {
             onUpdatePageLayout={setPageLayout}
             onUpdateContainerLayout={setContainerLayout}
             monthlyHistory={monthlyHistory}
+            projetosSemAtualizacao={projetosSemAtualizacao}
+            catalogoPortfolio={catalogoPortfolio}
+            onUpdateCatalogoPortfolio={setCatalogoPortfolio}
+            instrucoesServidor={instrucoesServidor}
             onUpdateMonthlyHistory={setMonthlyHistory}
           />
         )}
@@ -481,5 +562,6 @@ export default function App() {
       {/* Footer with Exed Logo and VMO Corporativo */}
       <Footer />
     </div>
+    </CatalogoProvider>
   );
 }

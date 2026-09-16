@@ -2,6 +2,8 @@ import React, { useMemo } from 'react';
 import { SapProjectFinancial, AppTheme, ContainerLayoutConfig, ContainerParamSettings, MonthlyKpiSnapshot } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
+import { useCatalogo } from '../context/CatalogoContext';
+import { filtrarProjetosPorPortfolio } from '../utils/portfolio';
 import { ClientLogo } from './ClientLogo';
 import { ContainerSlot } from './ContainerSlot';
 import { MoMBadge, MoMEmpty } from './MoMBadge';
@@ -13,6 +15,16 @@ import {
   latestHistoryMonth,
   hasProjectSnapshots
 } from '../utils/monthlyComparison';
+
+/**
+ * Receita planejada do projeto: usa a receita contratada da RSE (CTR + CR)
+ * quando existir. Só na falta dela deriva pelo custo planejado e pela margem.
+ */
+function receitaPlanejadaDoProjeto(p: SapProjectFinancial): number | null {
+  if (typeof p.contractRevenue === 'number' && Number.isFinite(p.contractRevenue)) return p.contractRevenue;
+  if (!p.budgetPlanned || typeof p.marginPercent !== 'number' || p.marginPercent >= 100) return null;
+  return Math.round(p.budgetPlanned / (1 - p.marginPercent / 100));
+}
 
 interface DetailedFinancialDashboardProps {
   projects: SapProjectFinancial[];
@@ -33,21 +45,15 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
   containerSettings,
   monthlyHistory = []
 }) => {
+  const rot = useCatalogo();
   // CÓDIGO MORTO (T9): o app é fixo em tema Neon, então isLight é sempre false.
   const isLight = theme === 'light';
 
-  // Filter projects by selected SAP solutions
-  const filteredProjects = useMemo(() => {
-    if (selectedFilters.includes('TODOS') || selectedFilters.length === 0) {
-      return projects;
-    }
-    return projects.filter(p => {
-      return selectedFilters.some(filter => {
-        if (filter === 'SCP') return Boolean(p.solution?.includes('SCP'));
-        return p.solution === filter;
-      });
-    });
-  }, [projects, selectedFilters]);
+  // Filtra por frente e solução (itens do mesmo grupo somam; grupos se cruzam)
+  const filteredProjects = useMemo(
+    () => filtrarProjetosPorPortfolio(projects, selectedFilters, rot.catalogo),
+    [projects, selectedFilters, rot.catalogo]
+  );
 
   // Client monogram helper
   const getClientInitials = (name: string) => {
@@ -64,8 +70,8 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
     return filteredProjects.reduce((acc, p) => {
       // Sem margem no projeto, não dá para derivar o faturamento planejado —
       // o "|| 24" que existia aqui era uma margem chutada.
-      if (!p.budgetPlanned || !p.marginPercent) return acc;
-      return acc + Math.round(p.budgetPlanned / (1 - p.marginPercent / 100));
+      const receita = receitaPlanejadaDoProjeto(p);
+      return receita === null ? acc : acc + receita;
     }, 0);
   }, [filteredProjects]);
 
@@ -85,13 +91,13 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
   }, [filteredProjects]);
 
   const weightedAverageMargin = useMemo(() => {
-    if (totalBilledRevenue === 0) return 0;
-    const totalMarginBRL = filteredProjects.reduce(
-      (acc, p) => acc + (p.billed || 0) * (p.marginPercent / 100),
-      0
-    );
-    return (totalMarginBRL / totalBilledRevenue) * 100;
-  }, [filteredProjects, totalBilledRevenue]);
+    // Só entram projetos com margem conhecida, no numerador e no denominador.
+    const comMargem = filteredProjects.filter(p => typeof p.marginPercent === 'number' && Number.isFinite(p.marginPercent));
+    const base = comMargem.reduce((acc, p) => acc + (p.billed || 0), 0);
+    if (base === 0) return 0;
+    const totalMarginBRL = comMargem.reduce((acc, p) => acc + (p.billed || 0) * (p.marginPercent / 100), 0);
+    return (totalMarginBRL / base) * 100;
+  }, [filteredProjects]);
 
   // ---------------------------------------------------------------------------
   // COMPARATIVOS MÊS A MÊS
@@ -178,16 +184,14 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
               {filteredProjects.map(p => {
                 // Sem orçado ou sem margem, não há como derivar o faturamento
                 // planejado — a linha mostra "—" em vez de assumir margem 24%.
-                const plannedRevenue =
-                  p.budgetPlanned && p.marginPercent
-                    ? Math.round(p.budgetPlanned / (1 - p.marginPercent / 100))
-                    : null;
+                const plannedRevenue = receitaPlanejadaDoProjeto(p);
                 const plannedBudget = p.budgetPlanned || 0;
                 const realBudget = p.budgetRealized || 0;
                 const margin = p.marginPercent;
                 // Referência: a meta quando configurada, senão a média ponderada.
-                const isMarginOk = margin >= marginBaseline;
-                const isMarginWarning = !isMarginOk && margin >= marginBaseline - 4;
+                const semMargem = !(typeof margin === 'number' && Number.isFinite(margin));
+                const isMarginOk = !semMargem && margin >= marginBaseline;
+                const isMarginWarning = semMargem || (!isMarginOk && margin >= marginBaseline - 4);
 
                 const billedVariance = refMonth
                   ? computeProjectVariance(monthlyHistory, p.id, 'billed', refMonth.year, refMonth.month)
@@ -236,7 +240,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
                           ? 'bg-slate-50 text-slate-700 border-slate-200'
                           : 'bg-[#06121E] text-slate-300 border-slate-700'
                       }`}>
-                        {p.solution}
+                        {rot.solucao(p.solution)}
                       </span>
                     </td>
 
@@ -263,7 +267,7 @@ export const DetailedFinancialDashboard: React.FC<DetailedFinancialDashboardProp
                     {/* Coluna 8: Margem de Contribuição */}
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
                       <span className={`font-mono font-bold text-[11px] px-2 py-0.5 border ${marginBadgeClass}`}>
-                        {margin.toFixed(1)}%
+                        {semMargem ? '—' : `${margin.toFixed(1)}%`}
                       </span>
                     </td>
 

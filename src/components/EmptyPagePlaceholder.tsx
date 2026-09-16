@@ -1,5 +1,6 @@
 import React from 'react';
 import { FilterSolutionType } from './LateralControls';
+import { catalogoEmUso, rotuloFiltro } from '../utils/portfolio';
 import { AlertCircle, FileText, BarChart3, Clock } from 'lucide-react';
 
 interface EmptyPagePlaceholderProps {
@@ -45,7 +46,7 @@ export const EmptyPagePlaceholder: React.FC<EmptyPagePlaceholderProps> = ({
         <div className="flex items-center gap-2 text-xs">
           <span className="text-slate-400">Filtro Ativo:</span>
           <span className="bg-[#071626] text-[#00D2FF] px-2.5 py-1 font-semibold border border-[#00D2FF]/30">
-            {selectedFilters.join(', ')}
+            {selectedFilters.map(f => rotuloFiltro(catalogoEmUso(), f)).join(', ')}
           </span>
         </div>
       </div>

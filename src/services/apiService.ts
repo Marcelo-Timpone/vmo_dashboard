@@ -79,36 +79,61 @@ export async function fetchVmoServerState(): Promise<{
 }
 
 /**
- * Sincroniza o estado atual do webapp para o servidor, para que o Claude veja os dados em tempo real
+ * Sincroniza o estado do webapp com o servidor.
+ * - Envia o cabeçalho x-vmo-client: webapp (o servidor registra a origem certa).
+ * - Com baseLastSaved, o servidor recusa (409) se os dados mudaram depois que a
+ *   tela carregou; nesse caso a tela deve recarregar do servidor.
  */
-export async function syncVmoServerState(state: Partial<AppStateData>): Promise<{
+export async function syncVmoServerState(
+  state: Partial<AppStateData>,
+  opcoes: { baseLastSaved?: string | null } = {}
+): Promise<{
   success: boolean;
   message?: string;
   error?: string;
+  conflict?: boolean;
+  lastSaved?: string;
+  avisos?: string[];
+  clientesCadastrados?: string[];
 }> {
   try {
     const apiKey = getStoredApiKey();
+    const corpo = opcoes.baseLastSaved ? { ...state, baseLastSaved: opcoes.baseLastSaved } : state;
     const res = await fetch('/api/vmo/state', {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
+        'x-vmo-client': 'webapp',
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(state)
+      body: JSON.stringify(corpo)
     });
+
+    if (res.status === 409) {
+      const conflito = await res.json().catch(() => ({}));
+      return {
+        success: false,
+        conflict: true,
+        error: conflito.mensagem || 'Os dados do servidor mudaram.',
+        lastSaved: conflito.ultima_atualizacao
+      };
+    }
 
     if (!res.ok) {
       const errJson = await res.json().catch(() => ({}));
       return {
         success: false,
-        error: errJson.mensagem || `Erro HTTP ${res.status}`
+        error: errJson.mensagem || errJson.detalhes || `Erro HTTP ${res.status}`
       };
     }
 
     const json = await res.json();
     return {
       success: true,
-      message: json.mensagem
+      message: json.mensagem,
+      lastSaved: json.ultima_atualizacao,
+      avisos: json.avisos,
+      clientesCadastrados: json.clientes_cadastrados
     };
   } catch (err: any) {
     return {

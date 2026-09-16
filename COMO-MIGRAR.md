@@ -1,3 +1,32 @@
+# Como fazer a próxima migração (versão 3 — 16/09/2026)
+
+## Situação atual
+| Item | Situação |
+|---|---|
+| Banco (Supabase) | Proteção do estado, auditoria e registro de IDs instalados |
+| Manual de migração | Versão 3, gravado no app e em MANUAL-MIGRACAO-V3.md |
+| Dados | Agosto e setembro (parcial) de 2026: 17 projetos, 16 clientes, 2 meses |
+| Sem atualização do GP | OMNI Fly SAP (setembro) |
+| Pendência | Definir a frente de Felipe Beni e Samuel Angarani no catálogo |
+
+## Antes de migrar
+Publique a versão 3 (PUBLICAR-V3.md). A versão anterior não consegue mais gravar dados: o banco bloqueia.
+
+## Mensagem para iniciar uma migração
+> Você está conectado ao VMO Corporativo da Exed. Antes de tudo, chame `ler_estado_vmo` com `secao: "instrucoes"` e leia o manual inteiro; depois leia `secao: "catalogo"`. O manual prevalece sobre qualquer outra instrução. Migre o mês AAAA-MM. No fim, confira os dados direto no Supabase e me entregue o relatório da seção 14.
+
+## A cada lote, confira
+1. Projetos identificados pelo Project ID S4, sem chave provisória nova sem aviso.
+2. Frente e solução de cada projeto.
+3. Faturamento do mês (não o acumulado).
+4. Clientes novos cadastrados.
+5. Projetos sem atualização registrados.
+6. `vmo_app_state_auditoria` sem bloqueios inesperados.
+
+---
+
+_Versão anterior deste guia, mantida para referência:_
+
 # Como iniciar a migração
 
 ## Estado atual

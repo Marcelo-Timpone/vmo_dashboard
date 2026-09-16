@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { getBrandAccent } from './brand';
 import { SapProjectFinancial, AppStateData } from '../types';
 import { formatCurrencyBRL } from './dateUtils';
+import { catalogoEmUso, frenteEfetiva, normalizarSolucao, rotuloFrente, rotuloSolucao, SOLUCOES_KEYS } from './portfolio';
 
 /**
  * Exports project financial dataset to real Excel (.xlsx) file
@@ -13,7 +14,8 @@ export function exportToExcel(projects: SapProjectFinancial[], filename: string 
     'Cliente': p.client,
     'Status': p.status || 'ATIVO',
     'Data Encerramento': p.closureDate || '',
-    'Solução SAP': p.solution,
+    'Frente': rotuloFrente(catalogoEmUso(), frenteEfetiva(p, catalogoEmUso())),
+    'Solução SAP': rotuloSolucao(catalogoEmUso(), p.solution),
     'Orçado (R$)': p.budgetPlanned,
     'Realizado (R$)': p.budgetRealized,
     'Faturado (R$)': p.billed,
@@ -21,7 +23,7 @@ export function exportToExcel(projects: SapProjectFinancial[], filename: string 
     'Possui CR em Aberto': p.hasOpenCr ? 'Sim' : 'Não',
     'Valor da CR (R$)': p.crValue ?? 0,
     'Desvio de Custo (%)': `${p.costVariancePercent}%`,
-    'Margem Estimada (%)': `${p.marginPercent}%`,
+    'Margem Estimada (%)': typeof p.marginPercent === 'number' ? `${p.marginPercent}%` : '—',
     'Tag de Tráfego': p.trafficTag,
     'Data de Referência': p.referenceDate,
     'Pasta SharePoint': p.sharePointFolder,
@@ -62,14 +64,15 @@ export function exportToExcel(projects: SapProjectFinancial[], filename: string 
  * Exports projects to CSV
  */
 export function exportToCsv(projects: SapProjectFinancial[], filename: string = 'Relatorio_VMO_Exed_Consulting.csv') {
-  const headers = ['Código', 'Nome', 'Cliente', 'Status', 'Data Encerramento', 'Solução SAP', 'Orçado (R$)', 'Realizado (R$)', 'Faturado (R$)', 'Gasto Reembolsável (R$)', 'CR em Aberto', 'Valor CR (R$)', 'Desvio (%)', 'Margem (%)', 'Tráfego', 'Data Ref', 'SharePoint'];
+  const headers = ['Código', 'Nome', 'Cliente', 'Status', 'Data Encerramento', 'Frente', 'Solução SAP', 'Orçado (R$)', 'Realizado (R$)', 'Faturado (R$)', 'Gasto Reembolsável (R$)', 'CR em Aberto', 'Valor CR (R$)', 'Desvio (%)', 'Margem (%)', 'Tráfego', 'Data Ref', 'SharePoint'];
   const rows = projects.map(p => [
     `"${p.code}"`,
     `"${p.name?.replace(/"/g, '""') || ''}"`,
     `"${p.client?.replace(/"/g, '""') || ''}"`,
     `"${p.status || 'ATIVO'}"`,
     `"${p.closureDate || ''}"`,
-    `"${p.solution}"`,
+    `"${rotuloFrente(catalogoEmUso(), frenteEfetiva(p, catalogoEmUso()))}"`,
+    `"${rotuloSolucao(catalogoEmUso(), p.solution)}"`,
     p.budgetPlanned,
     p.budgetRealized,
     p.billed,
@@ -228,16 +231,17 @@ export function exportStateToJson(
 export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string) {
   const ACCENT = getBrandAccent();
   const totalPlanned = projects.reduce((acc, p) => acc + p.budgetPlanned, 0);
-  const totalRealized = projects.reduce((acc, p) => acc + p.budgetRealized, 0);
-  const totalBilled = projects.reduce((acc, p) => acc + p.billed, 0);
-  const avgMargin = projects.length ? (projects.reduce((acc, p) => acc + p.marginPercent, 0) / projects.length).toFixed(1) : '0';
+  const totalRealized = projects.reduce((acc, p) => acc + (p.budgetRealized || 0), 0);
+  const totalBilled = projects.reduce((acc, p) => acc + (p.billed || 0), 0);
+  const comMargem = projects.filter(p => typeof p.marginPercent === 'number' && Number.isFinite(p.marginPercent));
+  const avgMargin = comMargem.length ? (comMargem.reduce((acc, p) => acc + p.marginPercent, 0) / comMargem.length).toFixed(1) : '—';
 
-  const solutions = ['Fábrica', 'RISE', 'GROW', 'SCP (IBP)', 'SCE'] as const;
-  const solutionStats = solutions.map(sol => {
-    const list = projects.filter(p => p.solution === sol);
-    const planned = list.reduce((a, b) => a + b.budgetPlanned, 0);
-    const realized = list.reduce((a, b) => a + b.budgetRealized, 0);
-    return { sol, count: list.length, planned, realized };
+  const catalogo = catalogoEmUso();
+  const solutionStats = SOLUCOES_KEYS.map(key => {
+    const list = projects.filter(p => normalizarSolucao(p.solution, catalogo) === key);
+    const planned = list.reduce((a, b) => a + (b.budgetPlanned || 0), 0);
+    const realized = list.reduce((a, b) => a + (b.budgetRealized || 0), 0);
+    return { sol: rotuloSolucao(catalogo, key), count: list.length, planned, realized };
   });
 
   // Create an HTML/MHTML formatted presentation file natively recognized by Microsoft PowerPoint and presentation viewers
@@ -282,7 +286,7 @@ export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string
       VMO Corporativo | Relatório Executivo de Projetos SAP
     </div>
     <div style="font-size: 16px; color: #CBD5E1; max-width: 600px; margin-bottom: 40px;">
-      Demonstrativo Financeiro e Status de Tráfego das Soluções Fábrica, RISE, GROW, SCP (IBP) e SCE
+      Demonstrativo Financeiro e Status de Tráfego por frente e solução
     </div>
     <div style="background: rgba(255,255,255,0.1); padding: 10px 24px; border: 1px solid ${ACCENT}; font-size: 13px;">
       Período de Referência: ${periodLabel}
@@ -375,11 +379,11 @@ export function exportToPpt(projects: SapProjectFinancial[], periodLabel: string
           <tr>
             <td><strong>${p.code}</strong></td>
             <td>${p.client}</td>
-            <td>${p.solution}</td>
+            <td>${rotuloSolucao(catalogoEmUso(), p.solution)}</td>
             <td>${formatCurrencyBRL(p.budgetPlanned)}</td>
             <td>${formatCurrencyBRL(p.budgetRealized)}</td>
             <td>${p.costVariancePercent >= 0 ? '+' : ''}${p.costVariancePercent}%</td>
-            <td>${p.marginPercent}%</td>
+            <td>${typeof p.marginPercent === 'number' ? p.marginPercent + '%' : '—'}</td>
             <td class="traffic-${p.trafficTag?.toLowerCase() || 'cinza'}">${p.trafficTag?.toUpperCase() || 'N/D'}</td>
           </tr>
         `).join('')}

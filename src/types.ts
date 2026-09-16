@@ -2,7 +2,30 @@ export type UserRole = 'pmo' | 'demonstrativo';
 
 export type AppTheme = 'neon' | 'light' | 'dark-solid';
 
-export type SolutionType = 'Fábrica' | 'RISE' | 'GROW' | 'SCP (IBP)' | 'SCE';
+// Solução: tipo de oferta SAP do projeto (RSE → PROJECT DATA → "Project Portfolio").
+// Frente: unidade de gestão chefiada pelo gerente de portfólio responsável; pode
+// reunir mais de uma solução. As chaves são fixas (6 soluções e 5 frentes); os
+// nomes exibidos ficam em CatalogoPortfolio e o PMO pode alterá-los.
+// Regras e conversões: src/utils/portfolio.ts.
+export type SolutionType = 'RISE' | 'GROW' | 'SCE' | 'SCP' | 'FSW' | 'DSC';
+export type FrontType = 'RISE' | 'GROW' | 'IBP' | 'SUPPLY_CHAIN' | 'FABRICA';
+
+export interface SolucaoConfig {
+  key: SolutionType;
+  label: string;
+}
+
+export interface FrenteConfig {
+  key: FrontType;
+  label: string;
+  responsaveis: string[]; // gerentes de portfólio responsáveis, como aparecem na RSE
+  solucoes: SolutionType[]; // soluções que a frente reúne
+}
+
+export interface CatalogoPortfolio {
+  solucoes: SolucaoConfig[]; // sempre 6, na ordem de SOLUCOES_KEYS
+  frentes: FrenteConfig[]; // sempre 5, na ordem de FRENTES_KEYS
+}
 
 export type TrafficTag = 'Verde' | 'Amarelo' | 'Vermelho';
 
@@ -23,6 +46,7 @@ export interface MonthlyProjectSnapshot {
   projectId: string;
   client?: string;
   solution?: string;
+  front?: string;
   budgetRealized?: number; // uso de orçamento real no mês (R$)
   billed?: number; // faturado acumulado do projeto até o fechamento do mês (R$)
   marginPercent?: number; // margem do projeto no mês (%)
@@ -105,7 +129,8 @@ export interface SapProjectFinancial {
   name: string;
   client: string;
   clientLogo?: string; // PNG pequeno ou Data URL em base64
-  solution: SolutionType;
+  solution: SolutionType; // chave da solução (RSE → Project Portfolio)
+  front?: FrontType; // chave da frente (definida pelo gerente de portfólio responsável)
   projectManager?: string; // GP responsável
   budgetPlanned: number; // Orçado
   budgetRealized: number; // Realizado
@@ -144,6 +169,39 @@ export interface SapProjectFinancial {
   // Informações Gerais - Contêiner 4: Avaliações NPS
   npsDate?: string; // Data da realização do NPS
   npsScore?: number; // Nota do NPS (0 a 10)
+  // ---------------------------------------------------------------------------
+  // Identificação e financeiro vindos da RSE (manual de migração v3)
+  // ---------------------------------------------------------------------------
+  projectIdS4?: string; // "Project ID (S4 Public Exed)" da aba PROJECT DATA — preenchido pelo Claude
+  projectIdMissing?: boolean; // true quando a RSE não trouxe o ID (id usa chave provisória)
+  portfolioManager?: string; // Gerente de portfólio — responsável pela frente (ver CatalogoPortfolio)
+  plannedStartDate?: string; // Início planejado (AAAA-MM-DD)
+  contractRevenue?: number; // Receita contratada CTR + CR (BILLING → Total)
+  contractValue?: number; // Receita do contrato original (BILLING → Contract)
+  taxRatePercent?: number; // Taxa de impostos do P&L Analytics (%)
+  marginPlanPercent?: number; // Margem planejada CTR + CR (%)
+  expensesNotReimbursable?: number; // Despesas não reembolsáveis (R$), somadas ao custo
+}
+
+/**
+ * Projeto cuja RSE mais recente tem Status Date fora do mês migrado: o GP não
+ * atualizou. Não entra no histórico nem na lista de projetos daquele mês e é
+ * listado em Pontos de Atenção. Mantido pelo Claude na migração.
+ */
+export interface ProjetoSemAtualizacao {
+  projectId: string; // Project ID (S4) ou chave provisória
+  projectIdS4?: string;
+  name: string;
+  client?: string;
+  solution?: string;
+  front?: string;
+  projectManager?: string;
+  portfolioManager?: string;
+  monthKey: string; // AAAA-MM do mês em que a atualização faltou
+  lastStatusDate?: string; // último Status Date encontrado (AAAA-MM-DD)
+  sourceFile?: string; // arquivo onde a atualização era esperada
+  detectedAt?: string; // quando foi detectado (ISO)
+  notes?: string;
 }
 
 export type WidgetType =
@@ -235,6 +293,13 @@ export interface AppStateData {
   pageLayout?: PageLayoutConfig[];
   containerLayout?: ContainerLayoutConfig[];
   monthlyHistory?: MonthlyKpiSnapshot[];
+  projetosSemAtualizacao?: ProjetoSemAtualizacao[];
+  catalogoPortfolio?: CatalogoPortfolio;
+  // Controle de concorrência da sincronização do webapp: a gravação é recusada
+  // (409) se o servidor tiver sido alterado depois desta data.
+  baseLastSaved?: string | null;
+  // Só com true o servidor aceita listas vazias (botão "Zerar dados").
+  confirmarLimpeza?: boolean;
   lastSaved: string;
   supabaseSyncedAt?: string;
 }
