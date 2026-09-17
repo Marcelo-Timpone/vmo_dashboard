@@ -7,9 +7,11 @@
 | Manual de migração | Versão 3, gravado no app e em MANUAL-MIGRACAO-V3.md |
 | Dados | Agosto e setembro (parcial) de 2026: 17 projetos, 16 clientes, 2 meses |
 | Sem atualização do GP | OMNI Fly SAP (setembro) |
-| Pendência | Definir a frente de Felipe Beni e Samuel Angarani no catálogo |
+| Frentes (pelo nome do gerente de portfólio) | RISE: Alexandre Ferreira; IBP: Zorday Cavalcanti; FÁBRICA: Guto Leite, Felipe Beni e Samuel Angarani; GROW e SUPPLY CHAIN sem responsável |
+| Backup | Configurações > Dados e backup (baixar, carregar, apagar tudo) |
 
 ## Antes de migrar
+Baixe um backup completo em Configurações > Dados e backup.
 Publique a versão 3 (PUBLICAR-V3.md). A versão anterior não consegue mais gravar dados: o banco bloqueia.
 
 ## Mensagem para iniciar uma migração
@@ -17,7 +19,7 @@ Publique a versão 3 (PUBLICAR-V3.md). A versão anterior não consegue mais gra
 
 ## A cada lote, confira
 1. Projetos identificados pelo Project ID S4, sem chave provisória nova sem aviso.
-2. Frente e solução de cada projeto.
+2. Frente e solução de cada projeto (a frente já gravada para o ID não pode mudar sozinha).
 3. Faturamento do mês (não o acumulado).
 4. Clientes novos cadastrados.
 5. Projetos sem atualização registrados.

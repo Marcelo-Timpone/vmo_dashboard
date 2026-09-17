@@ -106,8 +106,9 @@ const TOOLS = [
       'planilha, nunca o nome do arquivo: é ele que amarra o projeto ao seu histórico. ' +
       'Grave o mesmo valor em projectIdS4 (ou projectIdMissing: true quando a RSE não tiver o ID). ' +
       'solution é a chave da solução (RISE, GROW, SCE, SCP, FSW ou DSC), vinda do Project Portfolio. ' +
-      'front é a chave da frente (RISE, GROW, IBP, SUPPLY_CHAIN ou FABRICA), definida pelo gerente de ' +
-      'portfólio responsável (ler_estado_vmo secao="catalogo"); sem front, o servidor calcula. ' +
+      'front é a chave da frente (RISE, GROW, IBP, SUPPLY_CHAIN ou FABRICA), definida projeto a projeto ' +
+      'pelo NOME do gerente de portfólio conforme o catálogo (ler_estado_vmo secao="catalogo"); frente ' +
+      'fixada pelo PMO (frontManual) é mantida. A solução nunca decide a frente. ' +
       'Clientes que não existirem são cadastrados ' +
       'automaticamente. Lista vazia só apaga com confirmarLimpeza: true.',
     inputSchema: {

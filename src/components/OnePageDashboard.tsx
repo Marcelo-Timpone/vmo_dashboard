@@ -4,7 +4,8 @@ import {
   AppTheme,
   ContainerParamSettings,
   ContainerLayoutConfig,
-  MonthlyKpiSnapshot
+  MonthlyKpiSnapshot,
+  VmoReferencePeriod
 } from '../types';
 import { formatCurrencyBRL } from '../utils/dateUtils';
 import { FilterSolutionType } from './LateralControls';
@@ -24,11 +25,13 @@ import {
   formatDeltaAbs,
   formatDeltaPp,
   MONTH_ABBR,
-  MONTH_FULL
+  MONTH_FULL,
+  latestHistoryMonth
 } from '../utils/monthlyComparison';
 
 interface OnePageDashboardProps {
   projects: SapProjectFinancial[];
+  referencePeriod?: VmoReferencePeriod;
   selectedFilters: FilterSolutionType[];
   theme?: AppTheme;
   containerSettings?: ContainerParamSettings;
@@ -39,6 +42,7 @@ interface OnePageDashboardProps {
 
 export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
   projects,
+  referencePeriod,
   selectedFilters,
   theme = 'neon',
   containerSettings,
@@ -72,25 +76,21 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
 
   // ---------------------------------------------------------------------------
   // MÊS DE REFERÊNCIA DOS CARTÕES
-  // O mês corrente frequentemente ainda não fechou (a RSE do mês só é publicada
-  // no início do mês seguinte). Então a referência é o mês MAIS RECENTE que já
-  // existe no histórico. O chip no cabeçalho diz qual é, para não restar dúvida
+  // A referência é o mês analisado do período configurado em Configurações. Sem
+  // histórico dele, vale o último mês fechado (meses parciais ficam de fora). O chip no cabeçalho diz qual é, para não restar dúvida
   // sobre a que período os quatro números se referem.
   // ---------------------------------------------------------------------------
   const referenceMonth = useMemo(() => {
-    const sorted = [...monthlyHistory]
-      .filter(h => h && h.monthKey)
-      .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-    const latest = sorted[sorted.length - 1];
-    if (latest) return { year: latest.year, month: latest.month };
-    return { year: currentYear, month: currentMonthIdx + 1 };
-  }, [monthlyHistory, currentYear, currentMonthIdx]);
+    const ref = latestHistoryMonth(monthlyHistory, referencePeriod);
+    if (ref) return { year: ref.year, month: ref.month, parcial: ref.parcial };
+    return { year: currentYear, month: currentMonthIdx + 1, parcial: false };
+  }, [monthlyHistory, referencePeriod, currentYear, currentMonthIdx]);
 
   const hasHistory = monthlyHistory.length > 0;
 
   // Aggregates ao vivo (estado atual dos projetos) — usados nos contêineres que
   // não são "do mês": tabelas de contribuição, margem do mês corrente, etc.
-  const totalBilled = filteredProjects.reduce((acc, p) => acc + p.billed, 0);
+  const totalBilled = filteredProjects.reduce((acc, p) => acc + (p.billed || 0), 0);
   const uniqueClients = new Set(filteredProjects.map(p => p.client)).size;
 
   // ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     const clientMap = new Map<string, { client: string; logoUrl?: string; solution: string; billed: number; count: number }>();
     filteredProjects.forEach(p => {
       const existing = clientMap.get(p.client) || { client: p.client, logoUrl: p.clientLogo, solution: p.solution, billed: 0, count: 0 };
-      existing.billed += p.billed;
+      existing.billed += p.billed || 0;
       existing.count += 1;
       if (!existing.logoUrl && p.clientLogo) existing.logoUrl = p.clientLogo;
       clientMap.set(p.client, existing);
@@ -225,6 +225,15 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     return map;
   }, [monthlyHistory, currentYear]);
 
+  // Primeiro mês do ano com histórico: o acumulado começa nele, porque a
+  // migração pode começar no meio do ano. Um buraco DEPOIS dele interrompe a linha.
+  const firstBurnupIdx = useMemo(() => {
+    for (let i = 0; i < 12; i++) {
+      if (historyByMonth.has(i)) return i;
+    }
+    return null;
+  }, [historyByMonth]);
+
   const burnupMonths = useMemo(() => {
     let cumulative = 0;
     let brokeChain = false;
@@ -233,12 +242,12 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
       const entry = historyByMonth.get(idx);
       let actualAcc: number | null = null;
 
-      if (!brokeChain && entry) {
-        cumulative += entry.revenueBilled / 1_000_000;
+      const antesDoInicio = firstBurnupIdx === null || idx < firstBurnupIdx;
+      if (!antesDoInicio && !brokeChain && entry) {
+        cumulative += (entry.revenueBilled || 0) / 1_000_000;
         actualAcc = Number(cumulative.toFixed(1));
-      } else if (!entry) {
-        // A partir do primeiro mês sem dado migrado, paramos o acumulado
-        // (evita mostrar uma linha "real" com um buraco no meio).
+      } else if (!antesDoInicio && !entry) {
+        // Buraco depois do início: a linha para (não desenha real com lacuna).
         brokeChain = true;
       }
 
@@ -252,7 +261,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
         current: idx === currentMonthIdx
       };
     });
-  }, [annualTargetM, historyByMonth, currentMonthIdx, monthsBase]);
+  }, [annualTargetM, historyByMonth, currentMonthIdx, monthsBase, firstBurnupIdx]);
 
   // Escala Y do burnup: com meta, o topo é a meta anual (como antes). Sem meta,
   // o topo vem do próprio dado acumulado, com 15% de folga.
@@ -310,6 +319,28 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
     ? MARGIN_FLOOR_Y - (MARGIN_TARGET / MARGIN_MAX) * MARGIN_SPAN_Y
     : null;
 
+  // Mês atual (calendário): valor da barra do mês, vindo do histórico (parcial)
+  // ou, sem histórico, da média dos projetos ativos agora.
+  const valorMesAtual = marginMonths[currentMonthIdx]?.value ?? null;
+  const entradaMesAtual = historyByMonth.get(currentMonthIdx);
+  const mesAtualParcial = !entradaMesAtual || !!entradaMesAtual.parcial;
+  const deltaMesAtual = isPortfolioWide && entradaMesAtual
+    ? computeDelta(monthlyHistory, 'marginAvg', currentYear, currentMonthIdx + 1)
+    : null;
+
+  // Média móvel anual: média acumulada dos meses com dado até cada mês. Sem meta
+  // configurada, é a linha tracejada de referência do gráfico.
+  const mediaMovelAnual = useMemo(() => {
+    let soma = 0;
+    let n = 0;
+    return marginMonths.map(m => {
+      if (m.value === null || m.isFuture) return null;
+      soma += m.value;
+      n += 1;
+      return soma / n;
+    });
+  }, [marginMonths]);
+
   // Variação da margem do mês de referência contra o mês anterior (histórico)
   const marginDelta = isPortfolioWide
     ? computeDelta(monthlyHistory, 'marginAvg', referenceMonth.year, referenceMonth.month)
@@ -350,7 +381,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                   ? 'bg-slate-100 text-slate-700 border-slate-300'
                   : 'bg-[#071626] text-exed-accent border-exed-accent/30'
               }`}>
-                {referenceLabel}
+                {referenceLabel}{referenceMonth.parcial ? ' (parcial)' : ''}
               </span>
             )}
             {!isPortfolioWide && (
@@ -634,6 +665,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               <span className={`w-3 h-1 ${isLight ? 'bg-emerald-600' : 'bg-[#00FF88]'}`}></span>
               <span className={`font-semibold ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
                 Faturamento Real Acumulado
+                {firstBurnupIdx !== null && firstBurnupIdx > 0 ? ` desde ${monthsBase[firstBurnupIdx]}` : ''}
               </span>
             </div>
           </div>
@@ -783,14 +815,20 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           ? 'bg-white border-slate-200 shadow-sm'
           : 'bg-[#0A1C30] border-[#16385C] shadow-[0_4px_20px_rgba(0,0,0,0.3)]'
       }`}>
-        <div className={`text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
+        <div className={`flex flex-wrap items-center justify-between gap-2 text-xs font-bold uppercase tracking-wide mb-2 pb-1 border-b ${
           isLight ? 'text-slate-900 border-slate-200' : 'text-white border-slate-800'
         }`}>
-          Evolução da margem
+          <span>Evolução da margem</span>
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold normal-case tracking-normal">
+            <span className={`w-4 border-b border-dashed ${isLight ? 'border-sky-600' : 'border-[#00D2FF]'}`}></span>
+            <span className={isLight ? 'text-slate-600' : 'text-slate-300'}>
+              {MARGIN_TARGET !== null ? 'Meta de margem' : 'Média móvel anual'}
+            </span>
+          </span>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-2.5 items-stretch">
-          {/* Esquerda 25% — margem do mês de referência + variação real */}
+          {/* Esquerda 25%: em cima a meta (sem meta, a média do ano); embaixo o mês atual */}
           <div className={`lg:col-span-1 p-2.5 flex flex-col justify-between border ${
             isLight ? 'bg-slate-50 border-slate-200' : 'bg-[#071626] border-[#1E436E]'
           }`}>
@@ -798,17 +836,19 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               <div className={`text-[10px] font-bold uppercase tracking-wider mb-0.5 ${
                 isLight ? 'text-slate-600' : 'text-slate-400'
               }`}>
-                Margem do mês {hasHistory ? `(${referenceLabel})` : ''}
+                {MARGIN_TARGET !== null ? 'Meta de margem' : `Média do ano (${currentYear})`}
               </div>
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className={`text-2xl font-black tracking-tight ${
-                  isLight ? 'text-slate-900' : 'text-white'
-                }`}>
-                  {referenceMarginValue !== null ? `${referenceMarginValue.toFixed(1)}%` : '—'}
-                </span>
-                {marginDelta
-                  ? <MoMBadge delta={marginDelta} text={formatDeltaPp(marginDelta)} theme={theme} suffix="" />
-                  : isPortfolioWide && <MoMEmpty theme={theme} />}
+              <span className={`text-2xl font-black tracking-tight ${isLight ? 'text-slate-900' : 'text-white'}`}>
+                {MARGIN_TARGET !== null
+                  ? `${MARGIN_TARGET.toFixed(1)}%`
+                  : marginAverage !== null
+                  ? `${marginAverage.toFixed(1)}%`
+                  : '—'}
+              </span>
+              <div className="text-[9px] mt-0.5 text-slate-500">
+                {MARGIN_TARGET !== null
+                  ? 'Linha tracejada do gráfico.'
+                  : 'Média dos meses com dado no ano. É a linha tracejada do gráfico.'}
               </div>
             </div>
 
@@ -816,11 +856,16 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
               <div className={`text-[9px] font-bold uppercase tracking-wider mb-0.5 ${
                 isLight ? 'text-slate-600' : 'text-slate-400'
               }`}>
-                Mês corrente ({monthsBase[currentMonthIdx]}) — projetos ativos
+                Média do mês atual ({monthsBase[currentMonthIdx]}{mesAtualParcial ? ', parcial' : ''})
               </div>
-              <span className={`text-xl font-black ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
-                {currentAvgMargin !== null ? `${currentAvgMargin.toFixed(1)}%` : '—'}
-              </span>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className={`text-xl font-black ${isLight ? 'text-emerald-700' : 'text-[#00FF88]'}`}>
+                  {valorMesAtual !== null ? `${valorMesAtual.toFixed(1)}%` : '—'}
+                </span>
+                {deltaMesAtual && (
+                  <MoMBadge delta={deltaMesAtual} text={formatDeltaPp(deltaMesAtual)} theme={theme} suffix="" />
+                )}
+              </div>
             </div>
           </div>
 
@@ -974,6 +1019,33 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
                     </g>
                   );
                 })}
+                {/* Sem meta: a linha tracejada é a média móvel anual */}
+                {targetBaselineY === null && (() => {
+                  const colWidth = 28;
+                  const colSpacing = 77;
+                  const pontos = mediaMovelAnual
+                    .map((v, idx) =>
+                      v === null
+                        ? null
+                        : { x: 50 + idx * colSpacing + colWidth / 2, y: MARGIN_FLOOR_Y - (v / MARGIN_MAX) * MARGIN_SPAN_Y }
+                    )
+                    .filter((pt): pt is { x: number; y: number } => pt !== null);
+                  if (pontos.length === 0) return null;
+                  const traco =
+                    pontos.length === 1
+                      ? `${pontos[0].x - 30},${pontos[0].y} ${pontos[0].x + 30},${pontos[0].y}`
+                      : pontos.map(pt => `${pt.x},${pt.y}`).join(' ');
+                  return (
+                    <polyline
+                      points={traco}
+                      fill="none"
+                      stroke={isLight ? '#0284C7' : '#00D2FF'}
+                      strokeWidth="1.5"
+                      strokeDasharray="5 4"
+                      opacity="0.85"
+                    />
+                  );
+                })()}
               </svg>
             </div>
           </div>

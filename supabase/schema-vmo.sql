@@ -338,3 +338,104 @@ alter table public.vmo_projetos_ids enable row level security;
 
 alter table public.vmo_migracao_arquivos add column if not exists project_id_s4 text;
 alter table public.vmo_migracao_arquivos add column if not exists id_ausente boolean not null default false;
+
+-- =============================================================================
+-- VERSÃO 3.2 (17/09/2026) — backup completo, restauração e limpeza total
+-- Já aplicada no projeto vmo_dashboard (migração vmo_v31_backup_restauracao_limpeza).
+-- Chamadas só pelo servidor (service_role), via /api/vmo/backup.
+-- =============================================================================
+create or replace function public.vmo_resumo_dados()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'projetos', coalesce((select public.vmo_tamanho_lista(s.state_json->'projects') from public.vmo_app_state s where s.id = 'singleton'), 0),
+    'clientes', coalesce((select public.vmo_tamanho_lista(s.state_json->'clients') from public.vmo_app_state s where s.id = 'singleton'), 0),
+    'meses_historico', coalesce((select public.vmo_tamanho_lista(s.state_json->'monthlyHistory') from public.vmo_app_state s where s.id = 'singleton'), 0),
+    'projetos_sem_atualizacao', coalesce((select public.vmo_tamanho_lista(s.state_json->'projetosSemAtualizacao') from public.vmo_app_state s where s.id = 'singleton'), 0),
+    'registro_ids', (select count(*) from public.vmo_projetos_ids),
+    'arquivos_migrados', (select count(*) from public.vmo_migracao_arquivos),
+    'ultima_atualizacao', (select s.state_json->>'lastSaved' from public.vmo_app_state s where s.id = 'singleton')
+  )
+$$;
+
+create or replace function public.vmo_backup_completo()
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'formato', 'vmo-backup',
+    'versao', 2,
+    'gerado_em', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+    'estado', coalesce((select s.state_json - 'limpezaConfirmada' from public.vmo_app_state s where s.id = 'singleton'), '{}'::jsonb),
+    'tabelas', jsonb_build_object(
+      'vmo_projetos_ids', coalesce((select jsonb_agg(to_jsonb(p) order by p.chave) from public.vmo_projetos_ids p), '[]'::jsonb),
+      'vmo_migracao_arquivos', coalesce((select jsonb_agg(to_jsonb(m) order by m.semana, m.drive_file_id) from public.vmo_migracao_arquivos m), '[]'::jsonb)
+    ),
+    'resumo', public.vmo_resumo_dados()
+  )
+$$;
+
+create or replace function public.vmo_apagar_dados(p_carimbo text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(p_carimbo, '') = '' then
+    raise exception 'Carimbo de gravação obrigatório.';
+  end if;
+  update public.vmo_app_state
+  set state_json = state_json || jsonb_build_object(
+        'projects', '[]'::jsonb, 'clients', '[]'::jsonb, 'monthlyHistory', '[]'::jsonb,
+        'projetosSemAtualizacao', '[]'::jsonb, 'limpezaConfirmada', true,
+        'updatedBy', 'usuario-webapp-apagar-tudo', 'lastSaved', p_carimbo, 'escritaVerificadaEm', p_carimbo),
+      updated_at = now()
+  where id = 'singleton';
+  delete from public.vmo_projetos_ids where true;
+  delete from public.vmo_migracao_arquivos where true;
+  return public.vmo_resumo_dados();
+end
+$$;
+
+create or replace function public.vmo_restaurar_backup(p_backup jsonb, p_carimbo text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_estado jsonb := p_backup -> 'estado';
+begin
+  if coalesce(p_carimbo, '') = '' then
+    raise exception 'Carimbo de gravação obrigatório.';
+  end if;
+  if coalesce(p_backup ->> 'formato', '') <> 'vmo-backup' or jsonb_typeof(v_estado) is distinct from 'object' then
+    raise exception 'Arquivo não é um backup completo do VMO (formato vmo-backup).';
+  end if;
+  update public.vmo_app_state
+  set state_json = (v_estado - 'limpezaConfirmada' - 'escritaVerificadaEm') || jsonb_build_object(
+        'limpezaConfirmada', true, 'updatedBy', 'usuario-webapp-restaurar-backup',
+        'lastSaved', p_carimbo, 'escritaVerificadaEm', p_carimbo),
+      updated_at = now()
+  where id = 'singleton';
+  if not found then
+    insert into public.vmo_app_state (id, state_json, updated_at)
+    values ('singleton', (v_estado - 'limpezaConfirmada') || jsonb_build_object(
+      'updatedBy', 'usuario-webapp-restaurar-backup', 'lastSaved', p_carimbo, 'escritaVerificadaEm', p_carimbo), now());
+  end if;
+  if jsonb_typeof(p_backup -> 'tabelas') = 'object' then
+    delete from public.vmo_projetos_ids where true;
+    insert into public.vmo_projetos_ids (chave, project_id_s4, id_ausente, nome, cliente, frente, solucao, gerente_projeto,
+      gerente_portfolio, situacao, ultima_semana, ultimo_status_date, arquivo_origem, observacao, atualizado_em)
+    select r.chave, r.project_id_s4, coalesce(r.id_ausente, false), r.nome, r.cliente, r.frente, r.solucao, r.gerente_projeto,
+      r.gerente_portfolio, r.situacao, r.ultima_semana, r.ultimo_status_date, r.arquivo_origem, r.observacao, coalesce(r.atualizado_em, now())
+    from jsonb_populate_recordset(null::public.vmo_projetos_ids, coalesce(p_backup -> 'tabelas' -> 'vmo_projetos_ids', '[]'::jsonb)) r;
+    delete from public.vmo_migracao_arquivos where true;
+    insert into public.vmo_migracao_arquivos (drive_file_id, nome_arquivo, semana, codigo_exed, portfolio, cliente, status,
+      observacao, lido_em, project_id_s4, id_ausente)
+    select r.drive_file_id, r.nome_arquivo, r.semana, r.codigo_exed, r.portfolio, r.cliente, coalesce(r.status, 'ok'),
+      r.observacao, r.lido_em, r.project_id_s4, coalesce(r.id_ausente, false)
+    from jsonb_populate_recordset(null::public.vmo_migracao_arquivos, coalesce(p_backup -> 'tabelas' -> 'vmo_migracao_arquivos', '[]'::jsonb)) r;
+  end if;
+  return public.vmo_resumo_dados();
+end
+$$;
+
+revoke all on function public.vmo_resumo_dados() from public, anon, authenticated;
+revoke all on function public.vmo_backup_completo() from public, anon, authenticated;
+revoke all on function public.vmo_apagar_dados(text) from public, anon, authenticated;
+revoke all on function public.vmo_restaurar_backup(jsonb, text) from public, anon, authenticated;
+grant execute on function public.vmo_resumo_dados() to service_role;
+grant execute on function public.vmo_backup_completo() to service_role;
+grant execute on function public.vmo_apagar_dados(text) to service_role;
+grant execute on function public.vmo_restaurar_backup(jsonb, text) to service_role;

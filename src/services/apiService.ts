@@ -185,3 +185,70 @@ export async function testClaudeApiConnection(keyToTest?: string): Promise<{
     };
   }
 }
+
+// =============================================================================
+// BACKUP COMPLETO, RESTAURAÇÃO E LIMPEZA (endpoint /api/vmo/backup)
+// =============================================================================
+export interface ResumoDadosVmo {
+  projetos: number;
+  clientes: number;
+  meses_historico: number;
+  projetos_sem_atualizacao: number;
+  registro_ids: number;
+  arquivos_migrados: number;
+  ultima_atualizacao?: string;
+}
+
+/** true quando o objeto é um backup completo (formato vmo-backup). */
+export function ehBackupCompleto(obj: any): boolean {
+  return !!obj && obj.formato === 'vmo-backup' && typeof obj.estado === 'object' && obj.estado !== null;
+}
+
+/** Busca no servidor o backup completo (estado do app + tabelas de apoio). */
+export async function obterBackupCompleto(): Promise<{ success: boolean; backup?: any; error?: string }> {
+  try {
+    const res = await fetch('/api/vmo/backup', {
+      headers: { 'x-api-key': getStoredApiKey(), 'x-vmo-client': 'webapp' }
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json) {
+      return { success: false, error: json?.mensagem || `Erro HTTP ${res.status}` };
+    }
+    return { success: true, backup: json };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Falha de conexão com o servidor' };
+  }
+}
+
+async function executarAcaoBackup(
+  corpo: Record<string, unknown>
+): Promise<{ success: boolean; resumo?: ResumoDadosVmo; lastSaved?: string; error?: string }> {
+  try {
+    const res = await fetch('/api/vmo/backup', {
+      method: 'POST',
+      headers: {
+        'x-api-key': getStoredApiKey(),
+        'x-vmo-client': 'webapp',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(corpo)
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !json.sucesso) {
+      return { success: false, error: json.mensagem || `Erro HTTP ${res.status}` };
+    }
+    return { success: true, resumo: json.resumo, lastSaved: json.ultima_atualizacao };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Falha de conexão com o servidor' };
+  }
+}
+
+/** Apaga projetos, clientes, histórico, sem atualização, registro de IDs e log. */
+export function apagarTodosOsDados() {
+  return executarAcaoBackup({ acao: 'apagar_tudo', confirmacao: 'APAGAR' });
+}
+
+/** Substitui todos os dados do banco pelo conteúdo de um backup completo. */
+export function restaurarBackupCompleto(backup: any) {
+  return executarAcaoBackup({ acao: 'restaurar', confirmacao: 'RESTAURAR', backup });
+}

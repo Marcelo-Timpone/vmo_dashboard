@@ -3,8 +3,8 @@ export type UserRole = 'pmo' | 'demonstrativo';
 export type AppTheme = 'neon' | 'light' | 'dark-solid';
 
 // Solução: tipo de oferta SAP do projeto (RSE → PROJECT DATA → "Project Portfolio").
-// Frente: unidade de gestão chefiada pelo gerente de portfólio responsável; pode
-// reunir mais de uma solução. As chaves são fixas (6 soluções e 5 frentes); os
+// Frente: unidade de gestão chefiada pelo gerente de portfólio responsável. A
+// divisão é por PROJETO: projetos da mesma solução podem estar em frentes diferentes. As chaves são fixas (6 soluções e 5 frentes); os
 // nomes exibidos ficam em CatalogoPortfolio e o PMO pode alterá-los.
 // Regras e conversões: src/utils/portfolio.ts.
 export type SolutionType = 'RISE' | 'GROW' | 'SCE' | 'SCP' | 'FSW' | 'DSC';
@@ -19,7 +19,6 @@ export interface FrenteConfig {
   key: FrontType;
   label: string;
   responsaveis: string[]; // gerentes de portfólio responsáveis, como aparecem na RSE
-  solucoes: SolutionType[]; // soluções que a frente reúne
 }
 
 export interface CatalogoPortfolio {
@@ -54,6 +53,7 @@ export interface MonthlyProjectSnapshot {
 }
 
 export interface MonthlyKpiSnapshot {
+  parcial?: boolean; // mês em andamento: dados até a última RSE, regravar no fechamento
   monthKey: string; // 'YYYY-MM', ex: '2026-03' — usado como identificador único
   year: number;
   month: number; // 1 a 12
@@ -131,6 +131,7 @@ export interface SapProjectFinancial {
   clientLogo?: string; // PNG pequeno ou Data URL em base64
   solution: SolutionType; // chave da solução (RSE → Project Portfolio)
   front?: FrontType; // chave da frente (definida pelo gerente de portfólio responsável)
+  frontManual?: boolean; // true quando o PMO fixou a frente; migrações mantêm
   projectManager?: string; // GP responsável
   budgetPlanned: number; // Orçado
   budgetRealized: number; // Realizado

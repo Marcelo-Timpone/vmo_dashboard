@@ -26,7 +26,12 @@ import {
 } from './data/initialData';
 import { DEFAULT_CONTAINER_SETTINGS } from './components/ContainersConfigSection';
 import { calculateVmoReferencePeriod } from './utils/dateUtils';
-import { fetchVmoServerState, syncVmoServerState } from './services/apiService';
+import {
+  fetchVmoServerState,
+  syncVmoServerState,
+  apagarTodosOsDados,
+  restaurarBackupCompleto
+} from './services/apiService';
 import { CatalogoProvider } from './context/CatalogoContext';
 import { DEFAULT_CATALOGO_PORTFOLIO, definirCatalogoAtual, normalizarCatalogo } from './utils/portfolio';
 import { Header } from './components/Header';
@@ -301,7 +306,11 @@ export default function App() {
   // a data da versão carregada e o servidor recusa se ela estiver velha, e a
   // tela recarrega; (3) o que acabou de chegar do servidor não é reenviado.
   const aplicarEstadoDoServidor = (data: any) => {
-    const d = data?.dados || data || {};
+    // O GET devolve os dados em `dados` (nomes em português) e também na raiz
+    // (nomes em inglês). Antes só `dados` era lido, com nomes em inglês, e o
+    // histórico mensal e os layouts salvos nunca chegavam à tela.
+    const raiz = data || {};
+    const d = { ...raiz, ...(raiz.dados || {}) };
       const isCleared = localStorage.getItem('vmo_exed_projects_cleared');
       if (Array.isArray(d.projetos || d.projects)) {
         const serverProjects = d.projetos || d.projects;
@@ -342,17 +351,20 @@ export default function App() {
       if (containers && typeof containers === 'object') {
         setContainerSettings(containers);
       }
-      if (Array.isArray(d.pageLayout) && d.pageLayout.length > 0) {
-        setPageLayout(d.pageLayout);
+      const layoutPaginas = d.layout_paginas || d.pageLayout;
+      if (Array.isArray(layoutPaginas) && layoutPaginas.length > 0) {
+        setPageLayout(layoutPaginas);
       }
-      if (Array.isArray(d.containerLayout) && d.containerLayout.length > 0) {
+      const layoutConteineres = d.layout_conteineres || d.containerLayout;
+      if (Array.isArray(layoutConteineres) && layoutConteineres.length > 0) {
         // Acrescenta contêineres novos que o layout salvo ainda não conhece.
-        const idsSalvos = new Set(d.containerLayout.map((c: any) => c.id));
+        const idsSalvos = new Set(layoutConteineres.map((c: any) => c.id));
         const novos = INITIAL_CONTAINER_LAYOUT.filter(c => !idsSalvos.has(c.id));
-        setContainerLayout([...d.containerLayout, ...novos]);
+        setContainerLayout([...layoutConteineres, ...novos]);
       }
-      if (Array.isArray(d.monthlyHistory)) {
-        setMonthlyHistory(d.monthlyHistory);
+      const historico = d.historico_mensal || d.monthlyHistory;
+      if (Array.isArray(historico)) {
+        setMonthlyHistory(historico);
       }
       const period = d.periodo_referencia || d.referencePeriod;
       if (period && typeof period === 'object') {
@@ -385,6 +397,67 @@ export default function App() {
         }
       })
       .catch(() => {});
+  };
+
+  // Apagar tudo e restaurar backup: o banco executa a operação inteira de uma
+  // vez e a tela é recarregada a partir dele (nunca da cópia do navegador).
+  const recarregarDoServidorAgora = async (): Promise<boolean> => {
+    try {
+      const res = await fetchVmoServerState();
+      if (res.success && res.data) {
+        aplicarEstadoDoServidor(res.data);
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+
+  const handleApagarTodosOsDados = async (): Promise<{ ok: boolean; mensagem: string }> => {
+    const r = await apagarTodosOsDados();
+    if (!r.success) {
+      return { ok: false, mensagem: `Nada foi apagado: ${r.error || 'falha no servidor'}.` };
+    }
+    pularProximaSincronizacaoRef.current = true;
+    if (r.lastSaved) serverLastSavedRef.current = r.lastSaved;
+    try {
+      ['vmo_exed_projects_v5', 'vmo_exed_clients_v1', 'vmo_exed_monthly_history'].forEach(k => localStorage.removeItem(k));
+      localStorage.setItem('vmo_exed_projects_cleared', 'true');
+      localStorage.setItem('vmo_exed_clients_cleared', 'true');
+    } catch {}
+    setProjects([]);
+    setClients([]);
+    setMonthlyHistory([]);
+    setProjetosSemAtualizacao([]);
+    const recarregou = await recarregarDoServidorAgora();
+    return {
+      ok: true,
+      mensagem: recarregou
+        ? 'Todos os dados foram apagados no banco e nesta tela.'
+        : 'Dados apagados no banco. Recarregue a página para atualizar a tela.'
+    };
+  };
+
+  const handleRestaurarBackup = async (backup: any): Promise<{ ok: boolean; mensagem: string }> => {
+    const r = await restaurarBackupCompleto(backup);
+    if (!r.success) {
+      return { ok: false, mensagem: `Backup não restaurado: ${r.error || 'falha no servidor'}.` };
+    }
+    if (r.lastSaved) serverLastSavedRef.current = r.lastSaved;
+    try {
+      localStorage.removeItem('vmo_exed_projects_cleared');
+      localStorage.removeItem('vmo_exed_clients_cleared');
+    } catch {}
+    const recarregou = await recarregarDoServidorAgora();
+    const rs = r.resumo;
+    const detalhe = rs
+      ? `${rs.projetos} projetos, ${rs.clientes} clientes, ${rs.meses_historico} meses de histórico, ${rs.projetos_sem_atualizacao} sem atualização, ${rs.registro_ids} IDs e ${rs.arquivos_migrados} arquivos do log`
+      : 'dados do arquivo';
+    return {
+      ok: recarregou,
+      mensagem: recarregou
+        ? `Backup restaurado: ${detalhe}.`
+        : `Backup restaurado no banco (${detalhe}), mas a tela não recarregou. Atualize a página.`
+    };
   };
 
   // Carregar os dados do servidor (inclusive o que o Claude gravou) ao iniciar
@@ -549,6 +622,8 @@ export default function App() {
             catalogoPortfolio={catalogoPortfolio}
             onUpdateCatalogoPortfolio={setCatalogoPortfolio}
             instrucoesServidor={instrucoesServidor}
+            onApagarTodosOsDados={handleApagarTodosOsDados}
+            onRestaurarBackup={handleRestaurarBackup}
             onUpdateMonthlyHistory={setMonthlyHistory}
           />
         )}

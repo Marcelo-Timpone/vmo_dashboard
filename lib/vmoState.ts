@@ -153,12 +153,21 @@ export function garantirClientesCadastrados(state: ServerVmoState): string[] {
 }
 
 /**
- * Converte solução e frente de cada projeto para as chaves do catálogo e
- * calcula a frente pelo gerente de portfólio quando ela não vier. Altera os
- * objetos recebidos e devolve avisos (não bloqueia a gravação).
+ * Converte a solução para a chave do catálogo e define a frente PROJETO A
+ * PROJETO pelo nome do gerente de portfólio (catálogo). Frente fixada pelo PMO
+ * (frontManual) é mantida. Altera os objetos recebidos e devolve avisos (não
+ * bloqueia a gravação).
  */
-export function normalizarProjetosRecebidos(projetos: any[], catalogo: CatalogoPortfolio): string[] {
+export function normalizarProjetosRecebidos(
+  projetos: any[],
+  catalogo: CatalogoPortfolio,
+  anteriores: any[] = []
+): string[] {
   const avisos: string[] = [];
+  const anteriorPorId = new Map<string, any>();
+  anteriores.forEach((a: any) => {
+    if (a?.id) anteriorPorId.set(String(a.id), a);
+  });
   projetos.forEach((p: any) => {
     if (!p || typeof p !== 'object') return;
     const nome = p.name || p.id || '(sem nome)';
@@ -170,16 +179,30 @@ export function normalizarProjetosRecebidos(projetos: any[], catalogo: CatalogoP
       if (sol) p.solution = sol;
       else avisos.push(`${nome}: solução "${p.solution}" não existe (use ${SOLUCOES_KEYS.join(', ')}).`);
     }
-    const informada = normalizarFrente(p.front, catalogo);
-    if (informada) {
-      p.front = informada;
+
+    // 1) Frente fixada pelo PMO: mantida (frontManual: false explícito libera).
+    const anterior = p.id ? anteriorPorId.get(String(p.id)) : undefined;
+    const fixadaAgora = p.frontManual === true ? normalizarFrente(p.front, catalogo) : null;
+    const fixadaAntes = anterior?.frontManual === true ? normalizarFrente(anterior.front, catalogo) : null;
+    if (fixadaAgora || (fixadaAntes && p.frontManual !== false)) {
+      p.front = fixadaAgora || fixadaAntes;
+      p.frontManual = true;
       return;
     }
-    if (p.front) avisos.push(`${nome}: frente "${p.front}" não existe; recalculada pelo gerente de portfólio.`);
-    const regra = definirFrente(catalogo, p.portfolioManager, p.solution);
-    if (regra.frente) p.front = regra.frente;
+    delete p.frontManual;
+
+    // 2) Regra: frente em que o gerente de portfólio é responsável.
+    const regra = definirFrente(catalogo, p.portfolioManager);
+    if (regra.frente) {
+      p.front = regra.frente;
+      return;
+    }
+
+    // 3) Sem regra aplicável: mantém a frente atual (se houver) e avisa.
+    const mantida = normalizarFrente(p.front, catalogo) ?? normalizarFrente(anterior?.front, catalogo);
+    if (mantida) p.front = mantida;
     else delete p.front;
-    if (regra.aviso) avisos.push(`${nome}: ${regra.aviso}`);
+    if (regra.aviso) avisos.push(`${nome}: ${regra.aviso}${mantida ? ' Mantida a frente atual.' : ''}`);
   });
   return avisos;
 }
@@ -189,7 +212,7 @@ function normalizarSemAtualizacao(lista: any[] | undefined, catalogo: CatalogoPo
     if (!p || typeof p !== 'object') return;
     const sol = normalizarSolucao(p.solution, catalogo);
     if (sol) p.solution = sol;
-    const frente = normalizarFrente(p.front, catalogo) ?? definirFrente(catalogo, p.portfolioManager, p.solution).frente;
+    const frente = definirFrente(catalogo, p.portfolioManager).frente ?? normalizarFrente(p.front, catalogo);
     if (frente) p.front = frente;
   });
 }
@@ -462,8 +485,8 @@ export function applyIncomingUpdates(state: ServerVmoState, body: any): Resultad
   // 3. Projetos
   const incomingProjects = body.projects || body.projetos || body.dados?.projetos;
   if (Array.isArray(incomingProjects) && aceitaLista('projetos', incomingProjects, state.projects)) {
+    resultado.avisos.push(...normalizarProjetosRecebidos(incomingProjects, catalogo, state.projects || []));
     state.projects = incomingProjects;
-    resultado.avisos.push(...normalizarProjetosRecebidos(incomingProjects, catalogo));
     precisaConferirClientes = true;
   }
 

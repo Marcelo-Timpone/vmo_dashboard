@@ -188,3 +188,10 @@ sessão JWT que já existe em `lib/auth.ts` e então remover a exceção.
 | `registrar_projetos_sem_atualizacao` | Nova. Registra os projetos cujo GP não atualizou a RSE no mês. |
 
 Se o Supabase recusar uma gravação, a ferramenta agora devolve erro (antes respondia "sucesso").
+
+### Frente por projeto (v3.1)
+A frente vale por projeto: `substituir_projetos` mantém a frente já gravada para o mesmo ID e só aplica a regra do responsável (Portfolio Manager) em projetos novos. A solução nunca decide a frente. Responsável fora do catálogo, ou com mais de uma frente, deixa o projeto sem frente e gera aviso.
+
+### Frente pelo gerente de portfólio e backup (v3.2)
+- A frente é definida projeto a projeto pelo nome do Portfolio Manager, conforme o catálogo. Frente fixada pelo PMO (`frontManual: true`) é mantida.
+- Backup completo, restauração e limpeza ficam em `/api/vmo/backup` (GET baixa; POST com `acao` `restaurar` ou `apagar_tudo`). Não há ferramenta MCP para essas operações, de propósito: elas são feitas pelo PMO na tela.

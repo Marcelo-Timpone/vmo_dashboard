@@ -38,7 +38,9 @@ import {
   setStoredApiKey,
   testClaudeApiConnection,
   syncVmoServerState,
-  hasStoredApiKey
+  hasStoredApiKey,
+  obterBackupCompleto,
+  ehBackupCompleto
 } from '../services/apiService';
 import {
   pingAndSyncSupabase,
@@ -90,6 +92,10 @@ interface ConfigurationViewProps {
   onUpdateCatalogoPortfolio?: (catalogo: CatalogoPortfolio) => void;
   /** Instruções gravadas no servidor; têm prioridade sobre a cópia do navegador. */
   instrucoesServidor?: string;
+  /** Apaga os dados no banco e na tela (implementado no App). */
+  onApagarTodosOsDados?: () => Promise<{ ok: boolean; mensagem: string }>;
+  /** Restaura um backup completo no banco e recarrega a tela (implementado no App). */
+  onRestaurarBackup?: (backup: any) => Promise<{ ok: boolean; mensagem: string }>;
 }
 
 export const DEFAULT_APP_INSTRUCOES = `FONTE DOS DADOS
@@ -157,7 +163,9 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
   projetosSemAtualizacao = [] as ProjetoSemAtualizacao[],
   catalogoPortfolio = DEFAULT_CATALOGO_PORTFOLIO,
   onUpdateCatalogoPortfolio = (_catalogo: CatalogoPortfolio) => {},
-  instrucoesServidor = ''
+  instrucoesServidor = '',
+  onApagarTodosOsDados = async () => ({ ok: false, mensagem: 'Função indisponível nesta tela.' }),
+  onRestaurarBackup = async (_backup: any) => ({ ok: false, mensagem: 'Função indisponível nesta tela.' })
 }) => {
   const [activeSection, setActiveSection] = useState<
     'containers' | 'clients' | 'sharepoint' | 'upload' | 'projects' | 'period' | 'migration' | 'demonstrativo' | 'usuarios' | 'layout' | 'historico'
@@ -295,8 +303,23 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
           .filter(Boolean)
       }))
     };
-    onUpdateCatalogoPortfolio(normalizarCatalogo(comResponsaveis));
-    showNotification('Frentes e soluções salvas. Filtros e próximas migrações já usam esta configuração.');
+    const novoCatalogo = normalizarCatalogo(comResponsaveis);
+    onUpdateCatalogoPortfolio(novoCatalogo);
+    // Projetos com frente automática acompanham a nova regra do responsável.
+    let reclassificados = 0;
+    const atualizados = projects.map(proj => {
+      if (proj.frontManual) return proj;
+      const regra = definirFrente(novoCatalogo, proj.portfolioManager).frente;
+      if (!regra || regra === proj.front) return proj;
+      reclassificados += 1;
+      return { ...proj, front: regra };
+    });
+    if (reclassificados > 0) onUpdateProjects(atualizados);
+    showNotification(
+      reclassificados > 0
+        ? `Frentes e soluções salvas. ${reclassificados} projeto(s) mudaram de frente pela regra do responsável.`
+        : 'Frentes e soluções salvas. Filtros e próximas migrações já usam esta configuração.'
+    );
   };
 
   const alterarProjeto = (id: string, parcial: Partial<SapProjectFinancial>) => {
@@ -426,55 +449,69 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
     showNotification('Prompt do Claude salvo com sucesso!');
   };
 
-  // Funções do Menu DADOS DEMONSTRATIVOS (Execução direta sem window.confirm para funcionar em iframe)
-  const handleZerarDadosAtuais = () => {
-    try {
-      localStorage.setItem('vmo_exed_projects_cleared', 'true');
-      localStorage.setItem('vmo_exed_clients_cleared', 'true');
-      localStorage.setItem('vmo_exed_projects_v5', JSON.stringify([]));
-      localStorage.setItem('vmo_exed_clients_v1', JSON.stringify([]));
-    } catch {}
-    onUpdateProjects([]);
-    onUpdateClients([]);
-    syncVmoServerState({ projects: [], clients: [], confirmarLimpeza: true }).then(res => {
-      if (res.success) {
-        showNotification('Todos os dados atuais do webapp foram zerados com sucesso (0 projetos, 0 clientes).');
-      } else {
-        showNotification(
-          `Os dados foram zerados aqui na tela, mas houve falha ao salvar no servidor: ${res.error || 'erro desconhecido'}. Tente novamente ou verifique a conexão/chave de API.`,
-          true
-        );
-      }
-    });
+  // ---------------------------------------------------------------------------
+  // DADOS E BACKUP (substitui os antigos "dados demonstrativos")
+  // Apagar e restaurar rodam no banco, em uma operação só; a tela recarrega do
+  // servidor. O backup baixado vem do banco, não da cópia do navegador.
+  // ---------------------------------------------------------------------------
+  const [textoConfirmacaoApagar, setTextoConfirmacaoApagar] = useState('');
+  const [apagando, setApagando] = useState(false);
+  const [backupPendente, setBackupPendente] = useState<any | null>(null);
+  const [restaurando, setRestaurando] = useState(false);
+  const backupInputRef = useRef<HTMLInputElement>(null);
+  const resumoBackupPendente = (backupPendente?.resumo || {}) as Record<string, number | string | undefined>;
+
+  const formatarDataHora = (valor?: string) => {
+    if (!valor) return 'data desconhecida';
+    const d = new Date(valor);
+    return isNaN(d.getTime()) ? String(valor) : d.toLocaleString('pt-BR');
   };
 
-  const handleCarregarDadosDemonstrativos = () => {
-    const demoProjects = INITIAL_PROJECTS.map(p => ({
-      ...p,
-      status: 'DEMONSTRATIVO' as const
-    }));
-    const demoClients = INITIAL_CLIENTS.map(c => ({
-      ...c,
-      status: 'DEMONSTRATIVO' as const
-    }));
-    try {
-      localStorage.removeItem('vmo_exed_projects_cleared');
-      localStorage.removeItem('vmo_exed_clients_cleared');
-      localStorage.setItem('vmo_exed_projects_v5', JSON.stringify(demoProjects));
-      localStorage.setItem('vmo_exed_clients_v1', JSON.stringify(demoClients));
-    } catch {}
-    onUpdateProjects(demoProjects);
-    onUpdateClients(demoClients);
-    syncVmoServerState({ projects: demoProjects, clients: demoClients }).then(res => {
-      if (res.success) {
-        showNotification(`Dados demonstrativos carregados com sucesso (${demoProjects.length} projetos e ${demoClients.length} clientes demonstrativos).`);
-      } else {
+  const handleApagarTudo = async () => {
+    if (textoConfirmacaoApagar.trim().toUpperCase() !== 'APAGAR') {
+      showNotification('Digite APAGAR para confirmar.', true);
+      return;
+    }
+    setApagando(true);
+    const r = await onApagarTodosOsDados();
+    setApagando(false);
+    setTextoConfirmacaoApagar('');
+    showNotification(r.mensagem, !r.ok);
+  };
+
+  const lerArquivoBackup = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = evt => {
+      try {
+        const parsed = JSON.parse(String(evt.target?.result || ''));
+        if (ehBackupCompleto(parsed)) {
+          setBackupPendente(parsed);
+          return;
+        }
         showNotification(
-          `Os dados demonstrativos foram carregados aqui na tela, mas houve falha ao salvar no servidor: ${res.error || 'erro desconhecido'}.`,
+          'Este arquivo não é um backup completo (formato vmo-backup). Arquivos antigos entram por Importação e Alimentação de Dados.',
           true
         );
+      } catch (err: any) {
+        showNotification('Não foi possível ler o arquivo: ' + (err?.message || 'JSON inválido'), true);
       }
-    });
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSelecionarBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) lerArquivoBackup(file);
+    if (backupInputRef.current) backupInputRef.current.value = '';
+  };
+
+  const handleConfirmarRestauracao = async () => {
+    if (!backupPendente) return;
+    setRestaurando(true);
+    const r = await onRestaurarBackup(backupPendente);
+    setRestaurando(false);
+    if (r.ok) setBackupPendente(null);
+    showNotification(r.mensagem, !r.ok);
   };
 
   const showNotification = (text: string, isError: boolean = false) => {
@@ -621,8 +658,11 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
             solution: (newProject.solution as SolutionType) || p.solution,
             front:
               newProject.front ||
-              definirFrente(catalogoPortfolio, newProject.portfolioManager ?? p.portfolioManager, newProject.solution || p.solution).frente ||
+              definirFrente(catalogoPortfolio, newProject.portfolioManager ?? p.portfolioManager).frente ||
               undefined,
+            frontManual:
+              !!newProject.front &&
+              newProject.front !== definirFrente(catalogoPortfolio, newProject.portfolioManager ?? p.portfolioManager).frente,
             projectManager: newProject.projectManager || p.projectManager,
             status: projectStatus,
             closureDate: projectStatus === 'ENCERRADO' ? (newProject.closureDate || '') : undefined,
@@ -669,8 +709,10 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
         solution: (newProject.solution as SolutionType) || 'RISE',
         front:
           newProject.front ||
-          definirFrente(catalogoPortfolio, newProject.portfolioManager, newProject.solution || 'RISE').frente ||
+          definirFrente(catalogoPortfolio, newProject.portfolioManager).frente ||
           undefined,
+        frontManual:
+          !!newProject.front && newProject.front !== definirFrente(catalogoPortfolio, newProject.portfolioManager).frente,
         projectManager: newProject.projectManager || '',
         projectIdS4: newProject.projectIdS4 || undefined,
         projectIdMissing: newProject.projectIdS4 ? false : newProject.projectIdMissing,
@@ -763,6 +805,14 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
       try {
         const content = evt.target?.result as string;
         const parsed = JSON.parse(content);
+
+        // Backup completo (formato vmo-backup): restauração integral, com confirmação
+        if (ehBackupCompleto(parsed)) {
+          setBackupPendente(parsed);
+          setActiveSection('demonstrativo');
+          showNotification('Backup completo reconhecido. Confira o resumo em Dados e backup e confirme a restauração.');
+          return;
+        }
 
         let updatedWidgets = widgets;
         let updatedLinks = sharePointLinks;
@@ -934,32 +984,34 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
     }
   };
 
-  // 6. JSON DOWNLOAD TRIGGER
+  // 6. BACKUP COMPLETO (JSON) — gerado pelo banco, com todos os dados
   const handleDownloadJsonWithReactivation = async () => {
-    const currentState: AppStateData = {
-      projects,
-      widgets,
-      sharePointLinks,
-      referencePeriod,
-      clients,
-      containerSettings,
-      theme: (theme || 'neon') as AppTheme,
-      instrucoesPreenchimento,
-      localDosDados: migrationLink,
-      local_dos_dados: migrationLink,
-      lastSaved: new Date().toISOString()
-    };
+    const r = await obterBackupCompleto();
+    if (!r.success || !r.backup) {
+      showNotification(`Não foi possível gerar o backup: ${r.error || 'erro desconhecido'}.`, true);
+      return;
+    }
+    const blob = new Blob([JSON.stringify(r.backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const carimbo = String(r.backup.gerado_em || new Date().toISOString()).slice(0, 16).replace(/[-:T]/g, '');
+    link.href = url;
+    link.download = `vmo-backup-${carimbo}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
 
-    // Download the formatted JASON containing all webapp data
-    exportStateToJson(currentState, supabaseUsers, getJsonExportFilename());
-
-    // Background keepalive
+    // Mantém o ping de atividade do Supabase que existia no download antigo
     try {
       await pingAndSyncSupabase(supabaseUsers, widgets, sharePointLinks, referencePeriod);
       setLastPingTime(new Date().toISOString());
     } catch {}
 
-    showNotification('Arquivo JASON baixado com sucesso!');
+    const rs = r.backup.resumo || {};
+    showNotification(
+      `Backup baixado: ${rs.projetos ?? 0} projetos, ${rs.clientes ?? 0} clientes, ${rs.meses_historico ?? 0} meses de histórico, ${rs.projetos_sem_atualizacao ?? 0} sem atualização, ${rs.registro_ids ?? 0} IDs e ${rs.arquivos_migrados ?? 0} arquivos do log.`
+    );
   };
 
   // Reference Period Update
@@ -1098,7 +1150,7 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
               : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
           }`}
         >
-          DADOS DEMONSTRATIVOS
+          DADOS E BACKUP
         </button>
         <button
           type="button"
@@ -1311,6 +1363,9 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
               >
                 Selecionar Arquivo JASON
               </button>
+              <p className="text-[10px] text-slate-500 max-w-xs">
+                Backups completos (formato vmo-backup) são reconhecidos e seguem para Dados e backup, onde você confirma a restauração.
+              </p>
             </div>
 
             {/* Export Area */}
@@ -1366,7 +1421,7 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
               <div>
                 <h4 className="text-xs font-bold text-slate-900">Frentes e soluções</h4>
                 <p className="text-[11px] text-slate-600 max-w-3xl">
-                  A solução vem do campo Project Portfolio da RSE. A frente é a do gerente de portfólio responsável e pode reunir mais de uma solução. São sempre 6 soluções e 5 frentes: renomeie e redistribua à vontade, e os filtros acompanham.
+                  A solução vem do campo Project Portfolio da RSE. A frente é definida por projeto: a regra usa o gerente de portfólio responsável, e você pode mover qualquer projeto de frente. Projetos da mesma solução podem estar em frentes diferentes. São sempre 6 soluções e 5 frentes; renomeie à vontade e os filtros acompanham.
                 </p>
               </div>
               <button
@@ -1404,8 +1459,7 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                     <tr className="bg-slate-100 text-slate-700">
                       <th className="p-1.5 border border-slate-200 text-left">Frente</th>
                       <th className="p-1.5 border border-slate-200 text-left">Responsável (gerente de portfólio)</th>
-                      <th className="p-1.5 border border-slate-200 text-left">Soluções da frente</th>
-                      <th className="p-1.5 border border-slate-200 text-right">Projetos</th>
+                      <th className="p-1.5 border border-slate-200 text-left">Projetos da frente</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1432,27 +1486,50 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                           <span className="block text-[10px] text-slate-500 mt-0.5">Separe mais de um nome por vírgula.</span>
                         </td>
                         <td className="p-1.5 border border-slate-200 align-top">
-                          <div className="flex flex-wrap gap-x-3 gap-y-1">
-                            {catalogoEditavel.solucoes.map(sol => (
-                              <label key={sol.key} className="inline-flex items-center gap-1 text-slate-800">
-                                <input
-                                  type="checkbox"
-                                  checked={f.solucoes.includes(sol.key)}
-                                  onChange={e =>
-                                    atualizarFrente(f.key, {
-                                      solucoes: e.target.checked
-                                        ? [...f.solucoes, sol.key]
-                                        : f.solucoes.filter(x => x !== sol.key)
-                                    })
-                                  }
-                                />
-                                {sol.label || sol.key}
-                              </label>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="p-1.5 border border-slate-200 text-right align-top font-mono">
-                          {projects.filter(proj => frenteEfetiva(proj, catalogoPortfolio) === f.key).length}
+                          {(() => {
+                            const daFrente = projects.filter(proj => frenteEfetiva(proj, catalogoPortfolio) === f.key);
+                            const deOutras = projects.filter(proj => frenteEfetiva(proj, catalogoPortfolio) !== f.key);
+                            return (
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap gap-1">
+                                  {daFrente.length === 0 && (
+                                    <span className="text-[11px] text-slate-500">Nenhum projeto nesta frente.</span>
+                                  )}
+                                  {daFrente.map(proj => (
+                                    <span
+                                      key={proj.id}
+                                      title={`${proj.client}, solução ${rot.solucao(proj.solution)}`}
+                                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] border ${
+                                        proj.frontManual
+                                          ? 'bg-sky-50 text-sky-900 border-sky-200'
+                                          : 'bg-white text-slate-700 border-dashed border-slate-400'
+                                      }`}
+                                    >
+                                      {proj.name}
+                                      <span className="font-mono text-slate-500">{rot.solucao(proj.solution)}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                                {deOutras.length > 0 && (
+                                  <select
+                                    value=""
+                                    onChange={e => {
+                                      if (e.target.value) alterarProjeto(e.target.value, { front: f.key, frontManual: true });
+                                    }}
+                                    aria-label={`Mover projeto para a frente ${f.label}`}
+                                    className="w-full max-w-xs p-1 border border-slate-300 text-[11px] bg-white text-slate-700"
+                                  >
+                                    <option value="">Mover projeto para esta frente…</option>
+                                    {deOutras.map(proj => (
+                                      <option key={proj.id} value={proj.id}>
+                                        {proj.name} (hoje: {rot.frente(frenteEfetiva(proj, catalogoPortfolio))})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                       </tr>
                     ))}
@@ -1460,6 +1537,10 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                 </table>
               </div>
             </div>
+
+            <p className="text-[10px] text-slate-500">
+              Borda contínua: frente fixada pelo PMO, mantida nas próximas migrações. Borda tracejada: frente automática, pelo gerente de portfólio responsável.
+            </p>
 
             {projetosSemAtualizacao.length > 0 && (
               <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 p-2">
@@ -1938,18 +2019,33 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
                       <td className="p-2 border border-slate-200">
                         <select
                           value={frenteEfetiva(p, catalogoPortfolio) || ''}
-                          onChange={e => alterarProjeto(p.id, { front: (e.target.value || undefined) as FrontType | undefined })}
+                          onChange={e => {
+                            const escolhida = e.target.value as FrontType | '';
+                            alterarProjeto(
+                              p.id,
+                              escolhida
+                                ? { front: escolhida, frontManual: true }
+                                : {
+                                    front: definirFrente(catalogoPortfolio, p.portfolioManager).frente || undefined,
+                                    frontManual: false
+                                  }
+                            );
+                          }}
                           aria-label={`Frente de ${p.name}`}
                           className="w-full min-w-[110px] p-1 border border-slate-300 text-[11px] bg-white text-slate-900"
                         >
-                          <option value="">—</option>
+                          <option value="">Automática (responsável)</option>
                           {rot.catalogo.frentes.map(f => (
                             <option key={f.key} value={f.key}>{f.label}</option>
                           ))}
                         </select>
-                        {!normalizarFrente(p.front, catalogoPortfolio) && frenteEfetiva(p, catalogoPortfolio) && (
-                          <span className="block text-[10px] text-slate-500 mt-0.5">Pelo responsável</span>
-                        )}
+                        <span className="block text-[10px] text-slate-500 mt-0.5">
+                          {p.frontManual
+                            ? 'Fixada pelo PMO'
+                            : frenteEfetiva(p, catalogoPortfolio)
+                            ? 'Pelo responsável'
+                            : 'Responsável sem frente'}
+                        </span>
                       </td>
                       <td className="p-2 border border-slate-200">
                         <select
@@ -2289,26 +2385,108 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
       )}
 
       {/* ========================================================================= */}
-      {/* SECTION 8: DADOS DEMONSTRATIVOS */}
+      {/* SECTION 8: DADOS E BACKUP */}
       {/* ========================================================================= */}
       {activeSection === 'demonstrativo' && (
-        <div className="bg-white border border-slate-300 p-4 space-y-4" id="demonstrativo-config-panel">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              type="button"
-              onClick={handleZerarDadosAtuais}
-              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer border-none text-xs transition-colors"
-            >
-              Zerar Dados Atuais (Projetos e Clientes)
-            </button>
+        <div className="bg-white border border-slate-300 p-4 space-y-4 text-xs" id="dados-backup-panel">
+          <div className="font-bold text-sm text-[#0B2240] uppercase tracking-wide border-b border-slate-200 pb-2">
+            Dados e backup
+          </div>
 
-            <button
-              type="button"
-              onClick={handleCarregarDadosDemonstrativos}
-              className="px-4 py-2.5 bg-[#0B2240] hover:bg-[#123660] text-white font-bold cursor-pointer border-none text-xs transition-colors"
-            >
-              Carregar Dados Demonstrativos
-            </button>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="border border-slate-200 bg-slate-50 p-4 space-y-2 flex flex-col">
+              <div className="font-bold text-slate-900 text-sm">Baixar backup completo</div>
+              <p className="text-[11px] text-slate-600 flex-1">
+                Gera um arquivo JSON com tudo o que está no banco: projetos, clientes, histórico mensal, projetos sem atualização, frentes e soluções, instruções, layouts, configurações, registro de IDs e log de arquivos. Usuários e senhas não entram.
+              </p>
+              <button
+                type="button"
+                onClick={handleDownloadJsonWithReactivation}
+                className="px-4 py-2 bg-exed-accent hover:bg-exed-accent-strong text-white font-bold cursor-pointer border-none text-xs transition-colors self-start"
+              >
+                Baixar backup (JSON)
+              </button>
+            </div>
+
+            <div className="border border-slate-200 bg-slate-50 p-4 space-y-2 flex flex-col">
+              <div className="font-bold text-slate-900 text-sm">Carregar backup</div>
+              <p className="text-[11px] text-slate-600 flex-1">
+                Substitui todos os dados do banco e desta tela pelo conteúdo de um backup completo. Antes de confirmar, você vê o que o arquivo traz.
+              </p>
+              <input
+                type="file"
+                ref={backupInputRef}
+                onChange={handleSelecionarBackup}
+                accept=".json,application/json"
+                className="hidden"
+                id="input-backup-completo"
+              />
+              <button
+                type="button"
+                onClick={() => backupInputRef.current?.click()}
+                className="px-4 py-2 bg-[#0B2240] hover:bg-exed-accent text-white font-bold cursor-pointer border-none text-xs transition-colors self-start"
+              >
+                Selecionar backup (JSON)
+              </button>
+              {backupPendente && (
+                <div className="border border-sky-300 bg-sky-50 p-2 space-y-2">
+                  <div className="font-semibold text-sky-900">Backup gerado em {formatarDataHora(backupPendente.gerado_em)}</div>
+                  <ul className="text-[11px] text-sky-900 list-disc pl-4 space-y-0.5">
+                    <li>{resumoBackupPendente.projetos ?? '?'} projetos e {resumoBackupPendente.clientes ?? '?'} clientes</li>
+                    <li>
+                      {resumoBackupPendente.meses_historico ?? '?'} meses de histórico e {resumoBackupPendente.projetos_sem_atualizacao ?? '?'} projetos sem atualização
+                    </li>
+                    <li>
+                      {resumoBackupPendente.registro_ids ?? '?'} projetos no registro de IDs e {resumoBackupPendente.arquivos_migrados ?? '?'} arquivos no log
+                    </li>
+                  </ul>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={restaurando}
+                      onClick={handleConfirmarRestauracao}
+                      className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white font-bold border-none text-xs cursor-pointer"
+                    >
+                      {restaurando ? 'Restaurando…' : 'Substituir dados por este backup'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={restaurando}
+                      onClick={() => setBackupPendente(null)}
+                      className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 font-bold border border-slate-300 text-xs cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="border border-rose-300 bg-rose-50 p-4 space-y-2 flex flex-col">
+              <div className="font-bold text-rose-900 text-sm">Apagar todos os dados</div>
+              <p className="text-[11px] text-rose-900 flex-1">
+                Remove projetos, clientes, histórico mensal, projetos sem atualização, registro de IDs e log de arquivos, no banco e nesta tela. Mantém instruções, frentes e soluções, layout e configurações. Não dá para desfazer: baixe um backup antes.
+              </p>
+              <label htmlFor="confirmacao-apagar" className="text-[11px] font-semibold text-rose-900">
+                Digite APAGAR para confirmar
+              </label>
+              <input
+                id="confirmacao-apagar"
+                type="text"
+                value={textoConfirmacaoApagar}
+                onChange={e => setTextoConfirmacaoApagar(e.target.value)}
+                autoComplete="off"
+                className="w-full max-w-[200px] p-1.5 border border-rose-300 text-xs bg-white text-slate-900"
+              />
+              <button
+                type="button"
+                onClick={handleApagarTudo}
+                disabled={apagando || textoConfirmacaoApagar.trim().toUpperCase() !== 'APAGAR'}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold cursor-pointer border-none text-xs transition-colors self-start"
+              >
+                {apagando ? 'Apagando…' : 'Apagar todos os dados'}
+              </button>
+            </div>
           </div>
         </div>
       )}

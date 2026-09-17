@@ -3,10 +3,12 @@
 // ==============================================================================
 // Solução: tipo de oferta SAP do projeto. Na RSE vem de PROJECT DATA →
 //   "Project Portfolio". São sempre 6, com chaves fixas; só o nome exibido muda.
-// Frente: unidade de gestão chefiada por um ou mais gerentes de portfólio. Na
-//   RSE, PROJECT DATA → "Portfolio Manager" indica o responsável. São sempre 5.
-//   Uma frente pode reunir mais de uma solução, e uma solução pode aparecer em
-//   mais de uma frente: quem desempata é o gerente de portfólio.
+// Frente: unidade de gestão chefiada por um gerente de portfólio. Na RSE,
+//   PROJECT DATA → "Portfolio Manager" indica o responsável. São sempre 5.
+// A divisão por frente é POR PROJETO: projetos da mesma solução podem estar em
+// frentes diferentes (os projetos GROW do Felipe Beni ficam em FÁBRICA e os do
+// Alexandre Ferreira em RISE). A frente segue o NOME do gerente de portfólio.
+// A solução nunca decide a frente.
 // Os projetos guardam as CHAVES. Os nomes vêm do catálogo configurado pelo PMO
 // (Configurações > Gestão de projetos SAP > Frentes e soluções), então renomear
 // não quebra dados, filtros nem histórico.
@@ -15,7 +17,8 @@ import type { CatalogoPortfolio, FrenteConfig, FrontType, SolutionType } from '.
 export const SOLUCOES_KEYS: SolutionType[] = ['RISE', 'GROW', 'SCE', 'SCP', 'FSW', 'DSC'];
 export const FRENTES_KEYS: FrontType[] = ['RISE', 'GROW', 'IBP', 'SUPPLY_CHAIN', 'FABRICA'];
 
-// Regra informada pelo usuário em 15–16/09/2026. Editável pelo PMO.
+// Responsáveis informados pelo usuário entre 15 e 17/09/2026 (Samuel Angarani
+// responde pela fábrica de software, FSW). Editável pelo PMO.
 export const DEFAULT_CATALOGO_PORTFOLIO: CatalogoPortfolio = {
   solucoes: [
     { key: 'RISE', label: 'RISE' },
@@ -26,11 +29,11 @@ export const DEFAULT_CATALOGO_PORTFOLIO: CatalogoPortfolio = {
     { key: 'DSC', label: 'DSC' }
   ],
   frentes: [
-    { key: 'RISE', label: 'RISE', responsaveis: ['Alexandre Ferreira'], solucoes: ['RISE'] },
-    { key: 'GROW', label: 'GROW', responsaveis: ['Alexandre Ferreira'], solucoes: ['GROW'] },
-    { key: 'IBP', label: 'IBP', responsaveis: ['Zorday Cavalcanti'], solucoes: ['SCP'] },
-    { key: 'SUPPLY_CHAIN', label: 'SUPPLY CHAIN', responsaveis: ['Zorday Cavalcanti'], solucoes: ['SCE', 'DSC'] },
-    { key: 'FABRICA', label: 'FÁBRICA', responsaveis: ['Guto Leite'], solucoes: ['FSW', 'SCE'] }
+    { key: 'RISE', label: 'RISE', responsaveis: ['Alexandre Ferreira'] },
+    { key: 'GROW', label: 'GROW', responsaveis: [] },
+    { key: 'IBP', label: 'IBP', responsaveis: ['Zorday Cavalcanti'] },
+    { key: 'SUPPLY_CHAIN', label: 'SUPPLY CHAIN', responsaveis: [] },
+    { key: 'FABRICA', label: 'FÁBRICA', responsaveis: ['Guto Leite', 'Felipe Beni', 'Samuel Angarani'] }
   ]
 };
 
@@ -97,7 +100,7 @@ export function normalizarFrente(valor: unknown, catalogo?: CatalogoPortfolio): 
 
 /**
  * Garante exatamente 6 soluções e 5 frentes, nas chaves fixas e nessa ordem,
- * preservando nomes, responsáveis e soluções válidos da entrada.
+ * preservando nomes e responsáveis válidos da entrada.
  */
 export function normalizarCatalogo(entrada?: Partial<CatalogoPortfolio> | null): CatalogoPortfolio {
   const base = DEFAULT_CATALOGO_PORTFOLIO;
@@ -110,17 +113,14 @@ export function normalizarCatalogo(entrada?: Partial<CatalogoPortfolio> | null):
   const frentes: FrenteConfig[] = FRENTES_KEYS.map(key => {
     const padrao = base.frentes.find(f => f.key === key)!;
     const achada = Array.isArray(entrada?.frentes) ? entrada!.frentes!.find(f => f && f.key === key) : undefined;
-    if (!achada) return { ...padrao, responsaveis: [...padrao.responsaveis], solucoes: [...padrao.solucoes] };
+    if (!achada) return { key, label: padrao.label, responsaveis: [...padrao.responsaveis] };
     const label = String(achada.label ?? '').trim();
     return {
       key,
       label: label || padrao.label,
       responsaveis: Array.isArray(achada.responsaveis)
         ? achada.responsaveis.map(r => String(r).trim()).filter(Boolean)
-        : [...padrao.responsaveis],
-      solucoes: Array.isArray(achada.solucoes)
-        ? SOLUCOES_KEYS.filter(s => achada.solucoes.includes(s))
-        : [...padrao.solucoes]
+        : [...padrao.responsaveis]
     };
   });
   return { solucoes, frentes };
@@ -144,54 +144,36 @@ export interface ResultadoFrente {
 }
 
 /**
- * Regra de classificação: a frente é a do gerente de portfólio responsável.
- * Se ele responde por mais de uma frente, a solução do projeto desempata.
- * Se ele não está no catálogo, vale a única frente que atende a solução.
+ * Frente de um projeto NOVO pela regra do responsável: a frente cujo
+ * responsável é o gerente de portfólio da RSE. Sem frente ou com mais de uma,
+ * o projeto fica sem frente até o PMO definir. Projeto já existente mantém a
+ * frente gravada (tratado por quem chama).
  */
-export function definirFrente(
-  catalogo: CatalogoPortfolio,
-  gerentePortfolio?: string | null,
-  solucao?: string | null
-): ResultadoFrente {
-  const sol = normalizarSolucao(solucao, catalogo);
-  const nomeSol = sol ? rotuloSolucao(catalogo, sol) : 'vazia';
+export function definirFrente(catalogo: CatalogoPortfolio, gerentePortfolio?: string | null): ResultadoFrente {
   const gestor = nomePessoa(gerentePortfolio);
-  const doGestor = gestor ? catalogo.frentes.filter(f => f.responsaveis.some(r => nomePessoa(r) === gestor)) : [];
-
-  if (doGestor.length === 1) {
-    const f = doGestor[0];
-    const aviso = sol && !f.solucoes.includes(sol) ? `a solução ${nomeSol} não está entre as soluções da frente ${f.label}.` : null;
-    return { frente: f.key, aviso };
+  if (!gestor) {
+    return { frente: null, aviso: 'sem gerente de portfólio na RSE; defina a frente na lista de projetos.' };
   }
+  const doGestor = catalogo.frentes.filter(f => f.responsaveis.some(r => nomePessoa(r) === gestor));
+  if (doGestor.length === 1) return { frente: doGestor[0].key, aviso: null };
   if (doGestor.length > 1) {
-    const comSolucao = doGestor.filter(f => sol !== null && f.solucoes.includes(sol));
-    if (comSolucao.length === 1) return { frente: comSolucao[0].key, aviso: null };
     return {
       frente: null,
-      aviso: `${gerentePortfolio} responde por ${doGestor.map(f => f.label).join(' e ')}, e a solução ${nomeSol} não decide qual.`
-    };
-  }
-  const porSolucao = catalogo.frentes.filter(f => sol !== null && f.solucoes.includes(sol));
-  if (porSolucao.length === 1) {
-    return {
-      frente: porSolucao[0].key,
-      aviso: gerentePortfolio
-        ? `${gerentePortfolio} não é responsável por nenhuma frente; frente definida pela solução ${nomeSol}.`
-        : `sem gerente de portfólio; frente definida pela solução ${nomeSol}.`
+      aviso: `${gerentePortfolio} é responsável por mais de uma frente (${doGestor.map(f => f.label).join(', ')}); defina a frente na lista de projetos.`
     };
   }
   return {
     frente: null,
-    aviso: `não foi possível definir a frente (gerente de portfólio ${gerentePortfolio || 'vazio'}, solução ${nomeSol}).`
+    aviso: `${gerentePortfolio} não é responsável por nenhuma frente; defina a frente na lista de projetos ou inclua o gestor em Frentes e soluções.`
   };
 }
 
-/** Frente gravada no projeto ou, na falta dela, a calculada pela regra. */
+/** Frente gravada no projeto ou, na falta dela, a do responsável. */
 export function frenteEfetiva(
-  p: { front?: string | null; portfolioManager?: string | null; solution?: string | null },
+  p: { front?: string | null; portfolioManager?: string | null },
   catalogo: CatalogoPortfolio
 ): FrontType | null {
-  return normalizarFrente(p.front, catalogo) ?? definirFrente(catalogo, p.portfolioManager, p.solution).frente;
+  return normalizarFrente(p.front, catalogo) ?? definirFrente(catalogo, p.portfolioManager).frente;
 }
 
 // ------------------------------------------------------------------- filtros
