@@ -4,11 +4,11 @@ export type AppTheme = 'neon' | 'light' | 'dark-solid';
 
 // Solução: tipo de oferta SAP do projeto (RSE → PROJECT DATA → "Project Portfolio").
 // Frente: unidade de gestão chefiada pelo gerente de portfólio responsável. A
-// divisão é por PROJETO: projetos da mesma solução podem estar em frentes diferentes. As chaves são fixas (6 soluções e 5 frentes); os
+// divisão é por PROJETO: projetos da mesma solução podem estar em frentes diferentes. As chaves são fixas (6 soluções e 6 frentes); os
 // nomes exibidos ficam em CatalogoPortfolio e o PMO pode alterá-los.
 // Regras e conversões: src/utils/portfolio.ts.
 export type SolutionType = 'RISE' | 'GROW' | 'SCE' | 'SCP' | 'FSW' | 'DSC';
-export type FrontType = 'RISE' | 'GROW' | 'IBP' | 'SUPPLY_CHAIN' | 'FABRICA';
+export type FrontType = 'RISE' | 'GROW' | 'IBP' | 'SUPPLY_CHAIN' | 'FABRICA' | 'FSW';
 
 export interface SolucaoConfig {
   key: SolutionType;

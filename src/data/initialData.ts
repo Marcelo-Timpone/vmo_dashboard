@@ -940,7 +940,7 @@ export const INITIAL_PAGE_LAYOUT: PageLayoutConfig[] = [
 
 export const INITIAL_CONTAINER_LAYOUT: ContainerLayoutConfig[] = [
   { id: 'one_page__principais_informacoes', pageKey: 'one_page', label: 'Principais Informações do Mês', order: 0, hidden: false },
-  { id: 'one_page__meta_receita', pageKey: 'one_page', label: 'Receita Acumulada (Burnup)', order: 1, hidden: false },
+  { id: 'one_page__meta_receita', pageKey: 'one_page', label: 'Faturamento Acumulado (Burnup)', order: 1, hidden: false },
   { id: 'one_page__meta_margem', pageKey: 'one_page', label: 'Evolução da Margem', order: 2, hidden: false },
   { id: 'one_page__contribuicoes_metas', pageKey: 'one_page', label: 'Contribuições por Cliente', order: 3, hidden: false },
 

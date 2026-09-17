@@ -85,7 +85,7 @@ export const ContainersConfigSection: React.FC<ContainersConfigSectionProps> = (
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                Meta Anual de Receita (Burnup - R$)
+                Meta Anual de Faturamento (Burnup - R$)
               </label>
               <input
                 type="number"

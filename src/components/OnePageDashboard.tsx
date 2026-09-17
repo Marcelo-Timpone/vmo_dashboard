@@ -650,7 +650,7 @@ export const OnePageDashboard: React.FC<OnePageDashboardProps> = ({
           <span className={`text-xs font-bold uppercase tracking-wide ${
             isLight ? 'text-slate-900' : 'text-white'
           }`}>
-            Receita acumulada
+            Faturamento acumulado
           </span>
           <div className="flex items-center gap-3 text-[10px]">
             {/* T7: a linha base só aparece quando existe meta configurada, e o

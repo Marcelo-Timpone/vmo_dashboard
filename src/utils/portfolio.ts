@@ -4,7 +4,7 @@
 // Solução: tipo de oferta SAP do projeto. Na RSE vem de PROJECT DATA →
 //   "Project Portfolio". São sempre 6, com chaves fixas; só o nome exibido muda.
 // Frente: unidade de gestão chefiada por um gerente de portfólio. Na RSE,
-//   PROJECT DATA → "Portfolio Manager" indica o responsável. São sempre 5.
+//   PROJECT DATA → "Portfolio Manager" indica o responsável. São sempre 6.
 // A divisão por frente é POR PROJETO: projetos da mesma solução podem estar em
 // frentes diferentes (os projetos GROW do Felipe Beni ficam em FÁBRICA e os do
 // Alexandre Ferreira em RISE). A frente segue o NOME do gerente de portfólio.
@@ -15,10 +15,11 @@
 import type { CatalogoPortfolio, FrenteConfig, FrontType, SolutionType } from '../types';
 
 export const SOLUCOES_KEYS: SolutionType[] = ['RISE', 'GROW', 'SCE', 'SCP', 'FSW', 'DSC'];
-export const FRENTES_KEYS: FrontType[] = ['RISE', 'GROW', 'IBP', 'SUPPLY_CHAIN', 'FABRICA'];
+export const FRENTES_KEYS: FrontType[] = ['RISE', 'GROW', 'IBP', 'SUPPLY_CHAIN', 'FABRICA', 'FSW'];
 
-// Responsáveis informados pelo usuário entre 15 e 17/09/2026 (Samuel Angarani
-// responde pela fábrica de software, FSW). Editável pelo PMO.
+// Responsáveis corrigidos pelo usuário em 17/09/2026: a tabela de 15-17/09
+// juntava Guto Leite, Felipe Beni e Samuel Angarani na mesma frente (FÁBRICA)
+// por engano. Agora cada um tem a sua própria frente. Editável pelo PMO.
 export const DEFAULT_CATALOGO_PORTFOLIO: CatalogoPortfolio = {
   solucoes: [
     { key: 'RISE', label: 'RISE' },
@@ -32,8 +33,9 @@ export const DEFAULT_CATALOGO_PORTFOLIO: CatalogoPortfolio = {
     { key: 'RISE', label: 'RISE', responsaveis: ['Alexandre Ferreira'] },
     { key: 'GROW', label: 'GROW', responsaveis: [] },
     { key: 'IBP', label: 'IBP', responsaveis: ['Zorday Cavalcanti'] },
-    { key: 'SUPPLY_CHAIN', label: 'SUPPLY CHAIN', responsaveis: [] },
-    { key: 'FABRICA', label: 'FÁBRICA', responsaveis: ['Guto Leite', 'Felipe Beni', 'Samuel Angarani'] }
+    { key: 'SUPPLY_CHAIN', label: 'SUPPLY CHAIN', responsaveis: ['Guto Leite'] },
+    { key: 'FABRICA', label: 'FÁBRICA', responsaveis: ['Felipe Beni'] },
+    { key: 'FSW', label: 'FWS', responsaveis: ['Samuel Angarani'] }
   ]
 };
 
@@ -79,7 +81,9 @@ const SINONIMOS_FRENTE: Record<string, FrontType> = {
   'SUPPLY CHAIN': 'SUPPLY_CHAIN',
   'SUPPLYCHAIN': 'SUPPLY_CHAIN',
   'FABRICA': 'FABRICA',
-  'FABRICA DE SOFTWARE': 'FABRICA'
+  'FSW': 'FSW',
+  'FWS': 'FSW',
+  'FABRICA DE SOFTWARE': 'FSW'
 };
 
 /** Chave da solução a partir de um valor da RSE, de versão antiga ou de um nome do catálogo. */
@@ -99,7 +103,7 @@ export function normalizarFrente(valor: unknown, catalogo?: CatalogoPortfolio): 
 }
 
 /**
- * Garante exatamente 6 soluções e 5 frentes, nas chaves fixas e nessa ordem,
+ * Garante exatamente 6 soluções e 6 frentes, nas chaves fixas e nessa ordem,
  * preservando nomes e responsáveis válidos da entrada.
  */
 export function normalizarCatalogo(entrada?: Partial<CatalogoPortfolio> | null): CatalogoPortfolio {

@@ -267,7 +267,7 @@ export const ConfigurationView: React.FC<ConfigurationViewProps> = ({
   }, [instrucoesServidor]);
 
   // Frentes × soluções: nomes, responsáveis e soluções de cada frente.
-  // Quantidades fixas (6 soluções, 5 frentes) para os filtros continuarem valendo.
+  // Quantidades fixas (6 soluções, 6 frentes) para os filtros continuarem valendo.
   const rot = useCatalogo();
   const [catalogoEditavel, setCatalogoEditavel] = useState<CatalogoPortfolio>(catalogoPortfolio);
   const [responsaveisTexto, setResponsaveisTexto] = useState<Record<string, string>>({});
@@ -1421,7 +1421,7 @@ A chave de acesso é configurada acima nesta tela e deve ser enviada no cabeçal
               <div>
                 <h4 className="text-xs font-bold text-slate-900">Frentes e soluções</h4>
                 <p className="text-[11px] text-slate-600 max-w-3xl">
-                  A solução vem do campo Project Portfolio da RSE. A frente é definida por projeto: a regra usa o gerente de portfólio responsável, e você pode mover qualquer projeto de frente. Projetos da mesma solução podem estar em frentes diferentes. São sempre 6 soluções e 5 frentes; renomeie à vontade e os filtros acompanham.
+                  A solução vem do campo Project Portfolio da RSE. A frente é definida por projeto: a regra usa o gerente de portfólio responsável, e você pode mover qualquer projeto de frente. Projetos da mesma solução podem estar em frentes diferentes. São sempre 6 soluções e 6 frentes; renomeie à vontade e os filtros acompanham.
                 </p>
               </div>
               <button
