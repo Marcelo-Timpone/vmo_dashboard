@@ -1,7 +1,10 @@
-MANUAL DE MIGRAÇÃO RSE → VMO — versão 3 (16/09/2026)
-Escrito a partir do teste de agosto e setembro de 2026. Cada regra diz ONDE a
-informação está na RSE e COMO foi encontrada. Se a planilha divergir deste
-texto, confie na planilha e avise o usuário.
+MANUAL DE MIGRAÇÃO RSE → VMO — versão 4 (18/09/2026)
+Escrito a partir do teste de agosto e setembro de 2026, e corrigido em 18/09/2026
+após o usuário apontar 4 problemas reais no app (gastos do mês inflados,
+"Receita acumulada" mal nomeada, frentes FÁBRICA/SUPPLY CHAIN/FSW misturadas
+e documentação assinada nunca preenchida). Cada regra diz ONDE a informação
+está na RSE e COMO foi encontrada. Se a planilha divergir deste texto, confie
+na planilha e avise o usuário.
 
 ===============================================================================
 0. PRINCÍPIOS
@@ -42,6 +45,13 @@ texto, confie na planilha e avise o usuário.
   campos separados por vírgula, linhas separadas por espaço e textos com
   vírgula entre aspas. O resultado passa de 250 mil caracteres: salve em
   arquivo e processe por código.
+- CUIDADO: o separador de linha por espaço NÃO é confiável em toda parte.
+  Textos sem vírgula (ex.: "CONTRACT - ACTUAL", "Total Cost", "Job
+  Position") têm espaço mas NÃO vêm entre aspas, então cortar por espaço
+  quebra esses rótulos no meio (bug real encontrado processando a aba ETC —
+  ver seção 12). Nesses trechos, separe SÓ por vírgula (respeitando aspas) e
+  ache os campos por texto único (ex.: "Resource Name"), nunca por posição
+  ou por valores soltos como "1"/"2" (podem colidir com dado real).
 - Ordem das abas no texto: MIRROR ACTUAL, ADMIN, PROJECT DATA, RISKS,
   GERAL STATUS, BILLING, EXPENSES (+ DASHBOARD - EXPENSES), ETC - Actual Costs,
   EAC - Planned Costs, P&L Analytics, P&L Dashboard - MTD, QUALITY GATE.
@@ -118,15 +128,21 @@ BILLING — a aba mais organizada do faturamento:
 EXPENSES — gastos reais do projeto, um lançamento por linha: Type (CO/CR),
   Description, Date, Value, Resource, Category e Reimbursable.
   O painel "DASHBOARD - EXPENSES" traz TOTAL, REIMBURSABLE e
-  NOT REIMBURSABLE (os mesmos valores das linhas 1077 e 1078).
+  NOT REIMBURSABLE (os mesmos valores das linhas 1077 e 1078). Isso é só UMA
+  das duas fontes do gasto real do mês — ver seção 12.
 
-ETC - Actual Costs — custo de recursos (a maior parte do custo). Cabeçalho:
-  Contract Plan / Actual, Change Request Plan / Actual, Total e Deviation.
-  Por pessoa: Resource Name, Job Position, Rate, Start Date, End Date,
-  Total Hours, Total Cost e Horas/Custo de cada mês ATÉ O FIM DO PROJETO.
-  Por isso o "Actual Cost (ETC)" é o CUSTO TOTAL PREVISTO ATUALIZADO
-  (realizado + alocação futura), e não o gasto até hoje.
-  Ex.: na BTG, com 10% de avanço, o ETC já soma R$ 427.350.
+ETC - Actual Costs — custo de recursos (a maior parte do custo, e a OUTRA
+  fonte do gasto real do mês — ver seção 12). Cabeçalho: Contract Plan /
+  Actual, Change Request Plan / Actual, Total e Deviation. Duas grades
+  ("CONTRACT - ACTUAL" e "CHANGE REQUEST - ACTUAL"), cada uma por pessoa:
+  Resource Name, Job Position, Rate, Start Date, End Date, Total Hours,
+  Total Cost e Horas/Custo de cada mês ATÉ O FIM DO PROJETO (rótulo
+  "MonthName-YYYY", ex.: "August-2026"). Por isso o "Actual Cost (ETC)" do
+  PROJETO (GERAL STATUS, e o campo budgetRealized do cadastro do projeto) é
+  o CUSTO TOTAL PREVISTO ATUALIZADO (realizado + alocação futura), e não o
+  gasto até hoje — mas a MESMA grade, lida por coluna de mês, dá o gasto
+  daquele mês especificamente. Ex.: na BTG, com 10% de avanço, o ETC total
+  já soma R$ 427.350, mas o custo de agosto/2026 sozinho é R$ 31.350.
 
 EAC - Planned Costs — custo planejado na proposta (Contract + CR), com a
   mesma grade mensal.
@@ -142,26 +158,30 @@ Por que "custo × receita" não fazia sentido: a versão 2 punha a RECEITA em
 "Orçado" e a comparava com CUSTO. Todos os desvios saíam negativos, e o painel
 financeiro, que calcula receita = Orçado ÷ (1 − margem), inflava a receita.
 
-Mapeamento v3:
+Mapeamento v3 (campos do CADASTRO DO PROJETO — substituir_projetos; isto é
+diferente do histórico mensal, ver seção 12):
   budgetPlanned (Orçado)     = Total Cost (EAC) = linhas 1081 + 1082
   budgetRealized (Realizado) = Actual Cost (ETC) (1083 + 1084)
                                + Expenses - Total Not Reimbursable (1078)
+                               [ACUMULADO até o fim do projeto — usado na
+                               margem e no remainingResources. NÃO é o gasto
+                               do mês; para o gasto do mês, ver seção 12]
   plannedResources           = EAC total
-  totalResources             = ETC total
-  remainingResources         = EAC − ETC (negativo = estouro previsto)
+  totalResources              = ETC total
+  remainingResources          = EAC − ETC (negativo = estouro previsto)
   costVariancePercent        = (budgetRealized − budgetPlanned)
                                ÷ budgetPlanned × 100
                                (positivo = custo acima do planejado)
-  contractRevenue            = Revenue (CTR + CR) = BILLING → Total
-  contractValue              = BILLING → Contract
-  crValue                    = BILLING → Change Request (só se houver CR aberta)
-  taxRatePercent             = P&L Analytics → Taxa
+  contractRevenue             = Revenue (CTR + CR) = BILLING → Total
+  contractValue                = BILLING → Contract
+  crValue                      = BILLING → Change Request (só se houver CR aberta)
+  taxRatePercent               = P&L Analytics → Taxa
                                (0% nos contratos no exterior, 10% nos
                                nacionais e 23% na CIMPOR)
-  marginPlanPercent          = Margin Plan (CTR + CR)
-  marginPercent              = Forecast Margin
-  expensesNotReimbursable    = linha 1078
-  reimbursableExpenseTotal   = linha 1077 (repassado ao cliente; não é custo)
+  marginPlanPercent            = Margin Plan (CTR + CR)
+  marginPercent                 = Forecast Margin
+  expensesNotReimbursable     = linha 1078
+  reimbursableExpenseTotal    = linha 1077 (repassado ao cliente; não é custo)
 
 Conferência da margem (fechou em todos os projetos do teste):
   Receita líquida = Receita × (1 − Taxa)
@@ -199,6 +219,10 @@ Fonte: parcelas da BILLING (espelhadas nas linhas 377–726).
   usando a RSE mais recente de cada projeto (ela traz a lista completa).
   billed do projeto = acumulado até o fim do mês (no histórico) ou até o
   Status Date (na lista de projetos).
+  NOTA (18/09/2026): este campo (revenueBilled) é o FATURAMENTO do mês, não
+  a receita contratada (contractRevenue, seção 5). O app rotula o burnup
+  como "Faturamento acumulado" desde 18/09/2026 — antes dizia "Receita
+  acumulada", o que confundia os dois conceitos.
 
 ===============================================================================
 7. FRENTE × SOLUÇÃO
@@ -208,8 +232,10 @@ São dois conceitos diferentes, e o projeto guarda os dois:
   PROJECT DATA → "Project Portfolio". São 6, com chaves fixas:
   RISE, GROW, SCE, SCP, FSW e DSC.
 - FRENTE (campo front): a unidade de gestão, chefiada por gerentes de
-  portfólio. São 5, com chaves fixas: RISE, GROW, IBP, SUPPLY_CHAIN
-  (exibida como "SUPPLY CHAIN") e FABRICA (exibida como "FÁBRICA").
+  portfólio. São 6, com chaves fixas: RISE, GROW, IBP, SUPPLY_CHAIN
+  (exibida como "SUPPLY CHAIN"), FABRICA (exibida como "FÁBRICA") e FSW
+  (exibida como "FWS", fábrica de software — frente própria desde
+  18/09/2026, separada de FÁBRICA).
 A divisão por frente é POR PROJETO e segue o NOME do gerente de portfólio
 (Portfolio Manager, em PROJECT DATA), nunca a solução. Projetos da mesma
 solução podem estar em frentes diferentes: os projetos GROW do Felipe Beni
@@ -217,17 +243,18 @@ solução podem estar em frentes diferentes: os projetos GROW do Felipe Beni
 OMNI) estão na frente RISE.
 Os nomes exibidos e os responsáveis de cada frente ficam no catálogo:
 ler_estado_vmo secao="catalogo" ou, no app, Configurações > Gestão de
-projetos SAP > Frentes e soluções. São sempre 6 soluções e 5 frentes. Grave
+projetos SAP > Frentes e soluções. São sempre 6 soluções e 6 frentes. Grave
 sempre as CHAVES, nunca os nomes exibidos.
 
-Responsáveis (informados pelo usuário entre 15 e 17/09/2026):
+Responsáveis (corrigido pelo usuário em 18/09/2026 — a tabela de 15-17/09
+juntava os três na FÁBRICA por engano; cada gerente tem a própria frente):
   Frente         Responsáveis
   RISE           Alexandre Ferreira
   GROW           (nenhum)
   IBP            Zorday Cavalcanti
-  SUPPLY CHAIN   (nenhum)
-  FÁBRICA        Guto Leite, Felipe Beni e Samuel Angarani
-                 (Samuel responde pela fábrica de software, FSW)
+  SUPPLY CHAIN   Guto Leite
+  FÁBRICA        Felipe Beni
+  FSW (FWS)      Samuel Angarani
 O catálogo gravado prevalece sobre esta tabela: leia-o antes de classificar.
 
 Como classificar, projeto a projeto:
@@ -294,7 +321,18 @@ quantidade é fixa e as chaves não mudam.
   registrar_projetos_sem_atualizacao (com solução e frente); ele aparece em
   Pontos de Atenção.
   Caso do teste: OMNI Fly SAP (pasta 07/09 ainda com Status Date 31/08 e
-  nenhuma RSE em 14/09).
+  nenhuma RSE em 14/09) — por isso a OMNI entrou no histórico de agosto
+  (com RSE válida) mas saiu do de setembro.
+- Isso é diferente de um projeto ATIVO cuja RSE de setembro existe e está
+  atualizada, mas cuja grade de custo (aba ETC, seção 12) não tem nenhum
+  valor lançado na coluna do mês: nesse caso o projeto CONTINUA no mês
+  (billing, margem etc. continuam válidos), só o gasto do mês fica R$ 0,00 —
+  não use registrar_projetos_sem_atualizacao para isso, porque excluiria o
+  projeto inteiro incorretamente. Grave o R$ 0,00 e sinalize em notes (ex.:
+  "Setembro/2026: aba ETC sem custo de recurso lançado para o mês — GP não
+  atualizou essa parte da RSE; gasto real do mês pode estar subestimado.").
+  Casos do teste (18/09/2026): Elgin (Nova Planta Jundiaí), Alpargatas
+  (Squad Planejamento) e CEEC.
 - Encerrado: fim planejado vencido E ausente das RSE do mês seguinte →
   status "ENCERRADO" e closureDate = fim planejado. (Confirmado com
   Votorantim COL.)
@@ -318,8 +356,10 @@ npsScore, npsDate, usesCloudAlm, hasOpenCr (KPI - CR Open = Yes), crValue,
 crOpenDate, plannedStartDate, plannedEndDate, referenceDate (= Status Date),
 sharePointFolder (caminho completo do arquivo usado), notes (divergências).
 Datas no formato AAAA-MM-DD.
-Não existem na RSE (não preencher): signedDocumentsPercent, crDescription,
-qaStatus e pendenciesCount.
+Não existem na RSE (não preencher a partir da planilha): crDescription,
+qaStatus e pendenciesCount. signedDocumentsPercent NÃO vem da RSE, mas do
+Playbook Portal (QA/Quality Gate) — ver seção 16; preencha só para projetos
+ATIVOS, nunca para ENCERRADOS.
 
 ===============================================================================
 12. HISTÓRICO MENSAL (upsert_historico_mensal)
@@ -327,17 +367,53 @@ qaStatus e pendenciesCount.
 Por mês, com os projetos daquele mês (seção 10):
   revenueBilled (obrigatório) e marginAvg (obrigatório; média das margens
   válidas, sem as omitidas)
-  totalSpend = Σ budgetRealized;  plannedBudgetTotal = Σ budgetPlanned
+
+  totalSpend e projectSnapshots[].budgetRealized = GASTO REAL DO MÊS, não o
+  custo total do projeto. CORRIGIDO em 18/09/2026: a versão anterior deste
+  manual mandava usar Σ budgetRealized (o campo do PROJETO, que é ETC
+  acumulado até o fim do projeto — seção 5) e isso inflava o total mensal em
+  ~13x (agosto saiu R$ 37,3M em vez dos ~R$ 2,9M reais). O campo do PROJETO
+  (budgetRealized, cadastro + margem) continua sendo o acumulado — não mexa
+  nele. O do HISTÓRICO MENSAL é outra coisa, soma de duas fontes:
+    a) Custo de recursos do mês: aba "ETC - Actual Costs" da RSE mais
+       recente do mês (seção 4). Tem duas grades (CONTRACT - ACTUAL e
+       CHANGE REQUEST - ACTUAL), uma linha por recurso, com colunas
+       Hours/Cost repetidas por mês (rótulo "MonthName-YYYY", ex.:
+       "August-2026"). Some o campo Cost da coluna do mês desejado, de
+       TODAS as linhas de recurso, nas duas grades.
+    b) Despesas avulsas do mês: aba EXPENSES (seção 4), um lançamento por
+       linha. Some o Value das linhas cuja Date cai dentro do mês civil
+       (mesma janela da seção 10: dia 02 até dia 01 do mês seguinte).
+    totalSpend do mês = Σ (a + b) de todos os projetos daquele mês.
+    projectSnapshots[].budgetRealized = (a + b) daquele projeto naquele mês.
+  Como extrair (a) sem quebrar o rótulo "CONTRACT - ACTUAL" (ver aviso da
+  seção 2 sobre separar só por vírgula): ache o campo com o texto único
+  "Resource Name" (cabeçalho da grade de recursos) e conte quantos rótulos
+  "MonthName-YYYY" existem entre o marcador do bloco e "Resource Name" —
+  isso dá o número de colunas de mês (monthCount). A largura de cada linha
+  de recurso é sempre 9 + 2×monthCount campos (9 = N°, Resource Name, Job
+  Position, Rate, Start Date, End Date, Total Hours, Total Cost, + 1 campo
+  em branco). A primeira linha de recurso começa logo após a linha de
+  cabeçalho. NÃO ache a linha de recurso 1 procurando o valor "1" solto: se
+  algum recurso tiver Horas = 1 ou = 2 num mês qualquer, esse valor pode ser
+  confundido com o início da próxima linha (bug real na RSE da Cimpor, que
+  zerou o resultado até ser corrigido) — ancore sempre pela largura
+  calculada a partir de "Resource Name" + monthCount, nunca por valores.
+
+  plannedBudgetTotal = Σ budgetPlanned (esse continua sendo o EAC total do
+  projeto — é orçamento/meta, não gasto do mês, não muda)
   clientsServed = clientes distintos (normalizados);  activeProjects
   goLivesCompleted = go-lives "Concluded" com data no mês (RSE mais recente)
   avgScheduleDelay;  npsAvg (só projetos com NPS);  almAdoptionPercent
   openCrCount;  openCrValue = Σ crValue;  reimbursableTotal
-  projectSnapshots: projectId, client, solution, front, budgetRealized, billed,
-  marginPercent, reimbursableExpenseTotal
-Omita signedDocsAvg (não existe na RSE) e detractorCount (sem definição
-acordada). Mês em andamento: grave com parcial: true e regrave no fechamento
-(sem o parcial). O app usa o mês analisado do período configurado e ignora
-meses parciais quando esse mês não tem histórico.
+  projectSnapshots: projectId, client, solution, front, budgetRealized (ver
+  acima — gasto do MÊS, não acumulado), billed, marginPercent,
+  reimbursableExpenseTotal
+Omita signedDocsAvg quando não houver QA do Playbook para nenhum projeto do
+mês (seção 16) e detractorCount (sem definição acordada). Mês em andamento:
+grave com parcial: true e regrave no fechamento (sem o parcial). O app usa o
+mês analisado do período configurado e ignora meses parciais quando esse mês
+não tem histórico.
 
 ===============================================================================
 13. ORDEM DE GRAVAÇÃO E CONFERÊNCIA
@@ -365,7 +441,7 @@ Informe: meses e projetos migrados; projetos com ID provisório; projetos sem
 atualização; encerrados; clientes cadastrados; parcelas pela regra
 "as planned"; parcelas ignoradas e o motivo; erros de fórmula; custo previsto
 acima do EAC; go-lives vencidos ainda "Planned"; projetos sem frente definida; gerentes de portfólio
-fora do catálogo.
+fora do catálogo; projetos ativos com a grade ETC do mês vazia (seção 10).
 
 ===============================================================================
 15. BACKUP, RESTAURAÇÃO E LIMPEZA
@@ -385,3 +461,45 @@ fora do catálogo.
   (função vmo_apagar_dados). Mantém instruções, frentes e soluções, layout e
   configurações. Exige digitar APAGAR.
 - Antes de uma migração grande ou de apagar, baixe um backup.
+
+===============================================================================
+16. DOCUMENTAÇÃO ASSINADA (signedDocumentsPercent, via Playbook Portal)
+===============================================================================
+Pedido pelo usuário em 17/09/2026: signedDocumentsPercent (% de documentos
+assinados/concluídos) NÃO vem da RSE — vem do Playbook Portal, cruzando pelo
+cliente + projeto (ideal: pelo campo sapProjectId do Playbook, mas em
+17/09/2026 esse campo estava vazio em quase todos os projetos de lá; se
+ainda estiver vazio, cruze por nome do cliente + solução, confirme com o
+usuário antes de gravar em massa, e aproveite para preencher sapProjectId no
+Playbook com o "Project ID (S4 Public Exed)" do VMO — a chave de API do
+Playbook tem escopo de escrita desde 17/09/2026 justamente para isso).
+
+Como calcular:
+1. listar_qa_reviews (ou ler_portfolio_playbook secao="qa_reviews") traz uma
+   lista de auditorias QA, cada uma com projectName, client, phase,
+   validationDate, adherence e qualityGateDocs (array de {doc, status, fase}).
+2. Para cada projeto ATIVO do VMO, ache o QA mais recente do Playbook (maior
+   validationDate) para o projeto correspondente. Projetos ENCERRADOS não
+   precisam desse campo — pule-os.
+3. Dentro do qualityGateDocs desse QA, calcule:
+     signedDocumentsPercent = (docs com status "Concluído (evidência
+     anexada)") ÷ (docs com status != "Não aplicável (fora de escopo)") × 100
+   Confirmado pelo usuário em 17/09/2026: só "Concluído (evidência
+   anexada)" conta como assinado — "Aprovado internamente", "Em
+   elaboração" e "Não iniciado" NÃO contam.
+4. Grave em signedDocumentsPercent, projeto a projeto, via substituir_projetos
+   (lista completa, ver seção 11).
+Se o Playbook não tiver nenhum QA para um projeto ativo, omita o campo
+(regra de ouro da seção 0) e sinalize no relatório final. Requer o conector
+MCP do Playbook Portal conectado com escopo de leitura (mínimo) — sem ele,
+pule esta seção e avise o usuário.
+
+===============================================================================
+17. OBSERVAÇÃO IMPORTANTE
+===============================================================================
+Este manual é a "memória" do processo de migração. Ele não compartilha
+automaticamente a memória usada no chat do Claude.ai nem o CLAUDE.md do
+repositório local. Sempre que uma regra nova for definida numa conversa,
+replique aqui manualmente (ou peça para o Claude atualizar via
+atualizar_estado_vmo) E no CLAUDE.md / <projeto>/CONECTOR-MCP.md quando for
+uma lição de infraestrutura (não de dado financeiro).
